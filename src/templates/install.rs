@@ -1,108 +1,78 @@
-use std::{
-  fs,
-  path::{Path, PathBuf},
-  time::Duration,
-};
+use std::path::Path;
 
 use anyhow::Result;
 use reqwest::Client;
-use reqwest::header::USER_AGENT;
 use serde::{Deserialize, Serialize};
 
 use crate::{
+  AppContext, BACKEND_URL,
+  auth::token::get_auth_user,
   cache::{is_template_installed, update_templates_cache},
   utils::git::download_dir,
 };
 
-pub async fn install_template(template_path: &Path, path: &PathBuf) -> Result<()> {
-  let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-
-  let api_url = format!(
-    "https://api.github.com/repos/oxide-cli/templates/contents/{}",
-    path.to_str().unwrap_or_default()
-  );
-
-  let cleanup_path = template_path.join(path);
-  let template_path_clone = template_path.to_path_buf();
-
-  ctrlc::set_handler(move || {
-    println!("\n⚠ Interrupted! Cleaning up...");
-    if cleanup_path.exists() {
-      if let Err(e) = fs::remove_dir_all(&cleanup_path) {
-        println!("Failed to remove: {}", e);
-      }
-
-      let mut current = cleanup_path.parent();
-      while let Some(parent) = current {
-        if parent == template_path_clone {
-          break;
-        }
-        if fs::remove_dir(parent).is_err() {
-          break;
-        }
-        current = parent.parent();
-      }
-      println!("✓ Removed incomplete template");
-    }
-    std::process::exit(1);
-  })?;
-
-  download_dir(
-    &client,
-    &api_url,
-    &template_path.join(path),
-    true,
-    template_path,
-  )
-  .await?;
-
-  update_templates_cache(template_path, path)?;
-  println!("Template successfully downloaded");
-
-  Ok(())
+#[derive(Serialize)]
+struct GetTemplateUrl {
+  template_name: String,
 }
 
-#[derive(Serialize, Deserialize)]
-pub struct RegistryTemplate {
-  pub name: String,
-  pub path: String,
+#[derive(Deserialize)]
+struct GetTemplateUrlRes {
+  url: String,
 }
 
-pub async fn install_template_by_name(template_path: &Path, template_name: String) -> Result<()> {
-  let oxide_registry_file = template_path.join("oxide-registry.json");
+async fn get_template_url(
+  template_name: &str,
+  client: &Client,
+  auth_path: &Path,
+) -> Result<String> {
+  let user = get_auth_user(auth_path)?;
 
-  let is_indstalled = is_template_installed(&template_name, template_path)?;
-  if !is_indstalled {
-    let registry: Vec<RegistryTemplate> = if !oxide_registry_file.exists() {
-      let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
-      let raw_url =
-        "https://raw.githubusercontent.com/oxide-cli/templates/main/oxide-registry.json";
-      let content = client
-        .get(raw_url)
-        .header(USER_AGENT, "oxide")
-        .send()
-        .await?
-        .text()
-        .await?;
-      let registry: Vec<RegistryTemplate> = serde_json::from_str(&content)?;
-      fs::write(&oxide_registry_file, &content)?;
-      registry
-    } else {
-      let content = fs::read_to_string(&oxide_registry_file)?;
-      serde_json::from_str(&content)?
-    };
+  let res: GetTemplateUrlRes = client
+    .post(format!("{}/template/url", BACKEND_URL))
+    .bearer_auth(user.token)
+    .header("Content-Type", "application/json")
+    .body(serde_json::to_string(&GetTemplateUrl {
+      template_name: template_name.to_string(),
+    })?)
+    .send()
+    .await?
+    .error_for_status()?
+    .json()
+    .await?;
 
-    let entry = registry.iter().find(|t| t.name == template_name);
+  Ok(res.url)
+}
 
-    if let Some(p) = entry {
-      install_template(template_path, &PathBuf::from(&p.path)).await?;
-    } else {
-      anyhow::bail!("Template '{}' not found in registry", template_name);
+pub async fn install_template(ctx: &AppContext, template_name: &str) -> Result<()> {
+  let template_path = &ctx.paths.templates;
+  let is_installed = is_template_installed(ctx, template_name)?;
+
+  if !is_installed {
+    let url = get_template_url(template_name, &ctx.client, &ctx.paths.auth).await?;
+
+    let path: &Path = Path::new(template_name);
+
+    let cleanup_path = template_path.join(path);
+
+    {
+      let mut guard = ctx.cleanup_state.lock().unwrap();
+      *guard = Some(cleanup_path.clone());
     }
+
+    download_dir(&ctx.client, &url, &template_path.join(path)).await?;
+
+    {
+      let mut guard = ctx.cleanup_state.lock().unwrap();
+      *guard = None;
+    }
+
+    update_templates_cache(template_path, path)?;
+    println!("Template successfully downloaded");
 
     Ok(())
   } else {
-    println!("This template is installed in");
+    println!("Template '{}' is already installed", template_name);
     Ok(())
   }
 }

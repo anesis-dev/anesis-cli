@@ -1,46 +1,8 @@
-use std::{
-  fs,
-  path::{Path, PathBuf},
-};
+use std::{fs, path::Path};
 
 use anyhow::Result;
 
-use crate::{
-  prompts::{BuildTool, Language, Platform},
-  templates::TemplateFile,
-};
-
-pub fn generate_path(
-  language: &Option<Language>,
-  build_tool: &Option<BuildTool>,
-  framework_name: &str,
-  platform: &Option<Platform>,
-) -> PathBuf {
-  let mut path = PathBuf::new();
-
-  if let Some(lg) = language {
-    match lg {
-      Language::JavaScript => path.push("js"),
-      Language::TypeScript => path.push("ts"),
-    }
-  };
-
-  if let Some(bt) = build_tool {
-    path.push(bt.to_string().to_lowercase());
-  };
-
-  if framework_name == "Qwik" {
-    path.push("vite");
-  }
-
-  path.push(framework_name.to_string().to_lowercase());
-
-  if let Some(pl) = platform {
-    path.push(pl.to_string().to_lowercase());
-  };
-
-  path
-}
+use crate::templates::TemplateFile;
 
 pub fn read_dir_to_files(path: &Path) -> Result<Vec<TemplateFile>> {
   let mut files = Vec::new();

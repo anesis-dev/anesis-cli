@@ -1,228 +1,101 @@
+use std::{
+  path::PathBuf,
+  sync::{Arc, Mutex},
+  time::Duration,
+};
+
 use crate::{
+  auth::{account::print_user_info, login::login, logout::logout},
   cache::{get_installed_templates, remove_template_from_cache},
   cli::{Cli, commands::Commands},
   paths::OxidePaths,
-  prompts::{
-    BackendTool, BuildTool, DesktopRuntime, FrontendTool, Language, MetaFramework, MobileTool,
-    PackageManager, ProjectLayer,
-    variables::{
-      ask_backend_framework, ask_desctop_framework, ask_frontend_framework, ask_meta_framework,
-      ask_mobile_framework, ask_project_layer, ask_project_name,
-    },
+  templates::{
+    generator::extract_template, install::install_template, loader::get_files, publish::publish,
   },
-  templates::install::install_template_by_name,
   utils::{
-    setup::{SetupProjectOptions, setup_project},
-    validate::validate_project_name,
+    cleanup::setup_ctrlc_handler,
+    validate::{is_valid_github_repo_url, validate_project_name},
   },
 };
 use anyhow::Result;
 use clap::Parser;
+use reqwest::Client;
 
-pub mod cache;
-pub mod cli;
-pub mod config;
-pub mod paths;
-pub mod prompts;
-pub mod templates;
-pub mod utils;
+mod auth;
+mod cache;
+mod cli;
+mod config;
+mod paths;
+mod templates;
+mod utils;
 
-pub struct ProjectInitOptions {
-  pub name: Option<String>,
-  pub layer: Option<ProjectLayer>,
-  pub framework: Option<String>,
-  pub build_tool: Option<BuildTool>,
-  pub language: Option<Language>,
-  pub platform: Option<String>,
-  pub package_manager: Option<PackageManager>,
-  pub template_name: Option<String>,
+const BACKEND_URL: &str = "https://oxide-server.onrender.com";
+const FRONTEND_URL: &str = "https://oxide-cli.vercel.app";
+
+pub struct AppContext {
+  pub paths: OxidePaths,
+  pub client: Client,
+  pub cleanup_state: CleanupState,
 }
+
+type CleanupState = Arc<Mutex<Option<PathBuf>>>;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-  let oxide_paths = OxidePaths::new()?;
-
-  oxide_paths.ensure_directories()?;
-
   let cli = Cli::parse();
-  let template_path = oxide_paths.home.join("cache").join("templates");
+  let oxide_paths = OxidePaths::new()?;
+  oxide_paths.ensure_directories()?;
+  let client = Client::builder().timeout(Duration::from_secs(30)).build()?;
+  let cleanup_state: CleanupState = Arc::new(Mutex::new(None));
+
+  setup_ctrlc_handler(cleanup_state.clone(), oxide_paths.templates.clone())?;
+
+  let ctx = AppContext {
+    paths: oxide_paths,
+    client,
+    cleanup_state,
+  };
 
   match cli.command {
     Commands::New {
       name,
-      layer,
-      framework,
-      build_tool,
-      language,
-      platform,
-      package_manager,
-    } => {
-      let project_name = match name {
-        Some(n) => n,
-        None => ask_project_name()?,
-      };
-
-      validate_project_name(&project_name)?;
-
-      run_project_flow(
-        ProjectInitOptions {
-          name: Some(project_name),
-          layer,
-          framework,
-          build_tool,
-          language,
-          platform,
-          package_manager,
-          template_name: None,
-        },
-        &oxide_paths,
-        false,
-      )
-      .await?
-    }
-    Commands::Install {
       template_name,
-      layer,
-      framework,
-      build_tool,
-      language,
-      platform,
     } => {
-      run_project_flow(
-        ProjectInitOptions {
-          name: None,
-          layer,
-          framework,
-          build_tool,
-          language,
-          platform,
-          package_manager: None,
-          template_name,
-        },
-        &oxide_paths,
-        true,
-      )
-      .await?
+      validate_project_name(&name)?;
+
+      create_new_project(&ctx, &name, &template_name).await?
     }
+    Commands::InstallTemplate { template_name } => install_template(&ctx, &template_name).await?,
     Commands::Delete { template_name } => {
-      remove_template_from_cache(&template_path, &template_name)?;
+      remove_template_from_cache(&ctx.paths.templates, &template_name)?;
     }
-    Commands::Installed {} => get_installed_templates(&template_path)?,
+    Commands::Installed => get_installed_templates(&ctx.paths.templates)?,
+    Commands::Login => {
+      login(&ctx.paths.auth).await?;
+    }
+    Commands::Logout => {
+      logout(&ctx.paths.auth)?;
+    }
+    Commands::Account => {
+      print_user_info(&ctx).await?;
+    }
+    Commands::PublishTemplate { template_url } => {
+      is_valid_github_repo_url(&template_url)?;
+      publish(&ctx, &template_url).await?;
+    }
   }
 
   Ok(())
 }
-
-pub async fn run_project_flow(
-  options: ProjectInitOptions,
-  oxide_paths: &OxidePaths,
-  is_install: bool,
+async fn create_new_project(
+  ctx: &AppContext,
+  project_name: &str,
+  template_name: &str,
 ) -> Result<()> {
-  if let Some(tn) = options.template_name {
-    install_template_by_name(&oxide_paths.home.join("cache").join("templates"), tn).await?;
-  } else {
-    let project_layer = match options.layer {
-      Some(l) => l,
-      None => ask_project_layer()?,
-    };
-
-    match project_layer {
-      ProjectLayer::Frontend => {
-        let framework = match options.framework {
-          Some(f) => f.parse::<FrontendTool>()?,
-          None => ask_frontend_framework()?,
-        };
-        setup_project::<FrontendTool>(
-          SetupProjectOptions {
-            project_name: options.name,
-            framework,
-            build_tool: options.build_tool,
-            language: options.language,
-            platform: options.platform,
-            package_manager: options.package_manager,
-          },
-          oxide_paths,
-          is_install,
-        )
-        .await?
-      }
-      ProjectLayer::Meta => {
-        let framework = match options.framework {
-          Some(f) => f.parse::<MetaFramework>()?,
-          None => ask_meta_framework()?,
-        };
-        setup_project::<MetaFramework>(
-          SetupProjectOptions {
-            project_name: options.name,
-            framework,
-            build_tool: options.build_tool,
-            language: options.language,
-            platform: options.platform,
-            package_manager: options.package_manager,
-          },
-          oxide_paths,
-          is_install,
-        )
-        .await?;
-      }
-      ProjectLayer::Backend => {
-        let framework = match options.framework {
-          Some(f) => f.parse::<BackendTool>()?,
-          None => ask_backend_framework()?,
-        };
-        setup_project::<BackendTool>(
-          SetupProjectOptions {
-            project_name: options.name,
-            framework,
-            build_tool: options.build_tool,
-            language: options.language,
-            platform: options.platform,
-            package_manager: options.package_manager,
-          },
-          oxide_paths,
-          is_install,
-        )
-        .await?;
-      }
-      ProjectLayer::Desktop => {
-        let framework = match options.framework {
-          Some(f) => f.parse::<DesktopRuntime>()?,
-          None => ask_desctop_framework()?,
-        };
-        setup_project::<DesktopRuntime>(
-          SetupProjectOptions {
-            project_name: options.name,
-            framework,
-            build_tool: options.build_tool,
-            language: options.language,
-            platform: options.platform,
-            package_manager: options.package_manager,
-          },
-          oxide_paths,
-          is_install,
-        )
-        .await?;
-      }
-      ProjectLayer::Mobile => {
-        let framework = match options.framework {
-          Some(f) => f.parse::<MobileTool>()?,
-          None => ask_mobile_framework()?,
-        };
-        setup_project::<MobileTool>(
-          SetupProjectOptions {
-            project_name: options.name,
-            framework,
-            build_tool: options.build_tool,
-            language: options.language,
-            platform: options.platform,
-            package_manager: options.package_manager,
-          },
-          oxide_paths,
-          is_install,
-        )
-        .await?;
-      }
-    };
-  }
+  let files = get_files(ctx, template_name).await?;
+  extract_template(&files, project_name)?;
+  println!("✅ Project created successfully!");
+  println!("\nNext steps:");
+  println!("  cd {}", project_name);
   Ok(())
 }

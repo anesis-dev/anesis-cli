@@ -1,6 +1,6 @@
 [package]
 name = "oxide-cli"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 authors = ["Maksym <maksymzhuk759@gmail.com>"]
 description = "⚡ Lightning-fast project scaffolding tool for modern JavaScript/TypeScript development"
@@ -77,6 +77,9 @@ dirs = "6.0"
 ctrlc = "3.5.2"
 chrono = "0.4.43"
 comfy-table = "7"
+axum = "0.8.8"
+open = "5.3.3"
+url = "2.5.8"
 
 [dev-dependencies]
 assert_cmd = "2.0"

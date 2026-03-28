@@ -8,11 +8,7 @@ use tera::{Context, Tera};
 
 use crate::templates::TemplateFile;
 
-pub fn extract_template(
-  files: &[TemplateFile],
-  project_name: &str,
-  tauri_user_name: Option<String>,
-) -> Result<()> {
+pub fn extract_template(files: &[TemplateFile], project_name: &str) -> Result<()> {
   let output_path = PathBuf::from(project_name);
   fs::create_dir_all(&output_path)?;
 
@@ -20,8 +16,7 @@ pub fn extract_template(
   context.insert("project_name", project_name);
   context.insert("project_name_kebab", &to_kebab_case(project_name));
   context.insert("project_name_snake", &to_snake_case(project_name));
-  let user_name = tauri_user_name.unwrap_or("tauri".to_string());
-  context.insert("tauri_user_name", &user_name);
+  context.insert("tauri_user_name", "tauri");
 
   let mut tera = Tera::default();
 
@@ -57,8 +52,12 @@ pub fn extract_dir_contents(
   context: &Context,
 ) -> Result<()> {
   for file in files {
-    let file_name = file.path.file_name().unwrap();
+    let file_name = file
+      .path
+      .file_name()
+      .ok_or_else(|| anyhow::anyhow!("Invalid file path: {}", file.path.display()))?;
     let file_name_str = file_name.to_string_lossy();
+    let template_key = file.path.to_string_lossy();
 
     let output_path = base_path.join(&file.path);
     if let Some(parent) = output_path.parent() {
@@ -70,8 +69,8 @@ pub fn extract_dir_contents(
       let output_path = output_path.with_file_name(output_name);
 
       let template_content = std::str::from_utf8(&file.contents)?;
-      tera.add_raw_template(&file_name_str, template_content)?;
-      let rendered = tera.render(&file_name_str, context)?;
+      tera.add_raw_template(&template_key, template_content)?;
+      let rendered = tera.render(&template_key, context)?;
 
       fs::write(&output_path, rendered)?;
       println!("  ✓ {}", output_path.display());

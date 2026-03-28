@@ -1,16 +1,17 @@
-use std::path::Path;
+use std::{path::Path, sync::LazyLock};
 
 use anyhow::{Result, anyhow};
 use regex::Regex;
+use url::Url;
+
+static VALID_NAME_CHARS: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_\-\.]+$").unwrap());
 
 pub fn validate_project_name(name: &str) -> Result<()> {
   if name == "." {
     return Ok(());
   }
 
-  if Path::new(name).exists() {
-    return Err(anyhow!("Directory '{}' already exists!", name));
-  }
   if name.is_empty() {
     return Err(anyhow!("Project name cannot be empty"));
   }
@@ -19,7 +20,11 @@ pub fn validate_project_name(name: &str) -> Result<()> {
     return Err(anyhow!("Project name is too long (max 255 characters)"));
   }
 
-  let valid_chars = Regex::new(r"^[a-zA-Z0-9_\-\.]+$").unwrap();
+  if Path::new(name).exists() {
+    return Err(anyhow!("Directory '{}' already exists!", name));
+  }
+
+  let valid_chars = &*VALID_NAME_CHARS;
   if !valid_chars.is_match(name) {
     return Err(anyhow!(
       "Project name can only contain letters, numbers, hyphens, underscores, and dots"
@@ -42,6 +47,29 @@ pub fn validate_project_name(name: &str) -> Result<()> {
   let uppercase_name = name.to_uppercase();
   if reserved_windows.contains(&uppercase_name.as_str()) {
     return Err(anyhow!("'{}' is a reserved name in Windows", name));
+  }
+
+  Ok(())
+}
+
+pub fn is_valid_github_repo_url(input: &str) -> Result<()> {
+  let Ok(url) = Url::parse(input) else {
+    return Err(anyhow!("Invalid URL format"));
+  };
+
+  if url.host_str() != Some("github.com") {
+    return Err(anyhow!("URL is not a GitHub domain"));
+  }
+
+  let segments: Vec<_> = match url.path_segments() {
+    Some(s) => s.collect(),
+    None => {
+      return Err(anyhow!("Failed to extract path segments from URL"));
+    }
+  };
+
+  if segments.len() < 2 {
+    return Err(anyhow!("URL does not point to a GitHub repository"));
   }
 
   Ok(())

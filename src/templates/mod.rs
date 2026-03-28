@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub mod generator;
 pub mod install;
 pub mod loader;
+pub mod publish;
 
 pub struct TemplateFile {
   pub path: PathBuf,
