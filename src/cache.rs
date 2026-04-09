@@ -21,9 +21,10 @@ pub struct CachedTemplate {
   pub source: String,
   pub path: String,
   pub official: bool,
+  pub commit_sha: String,
 }
 
-pub fn update_templates_cache(template_path: &Path, path: &Path) -> Result<()> {
+pub fn update_templates_cache(template_path: &Path, path: &Path, commit_sha: &str) -> Result<()> {
   let oxide_json = template_path.join(path).join("oxide.template.json");
   let content = fs::read_to_string(&oxide_json)?;
   let template_info: OxideTemplate = serde_json::from_str(&content)?;
@@ -41,12 +42,17 @@ pub fn update_templates_cache(template_path: &Path, path: &Path) -> Result<()> {
 
   templates_info.last_updated = Utc::now().to_rfc3339();
 
+  // Replace existing entry to avoid duplicates on re-download
+  templates_info
+    .templates
+    .retain(|t| t.name != template_info.name);
   templates_info.templates.push(CachedTemplate {
     name: template_info.name,
     version: template_info.version,
     source: template_info.repository.url,
     path: path.to_string_lossy().to_string(),
     official: template_info.official,
+    commit_sha: commit_sha.to_string(),
   });
 
   fs::write(
@@ -57,19 +63,46 @@ pub fn update_templates_cache(template_path: &Path, path: &Path) -> Result<()> {
   Ok(())
 }
 
+pub fn get_cached_template(ctx: &AppContext, name: &str) -> Result<Option<CachedTemplate>> {
+  let templates_json = ctx.paths.templates.join("oxide-templates.json");
+
+  if !templates_json.exists() {
+    return Ok(None);
+  }
+
+  let content = fs::read_to_string(&templates_json)?;
+  let templates_info: TemplatesCache = serde_json::from_str(&content)?;
+
+  Ok(
+    templates_info
+      .templates
+      .into_iter()
+      .find(|t| t.name == name),
+  )
+}
+
 pub fn remove_template_from_cache(template_path: &Path, template_name: &str) -> Result<()> {
   let templates_json = template_path.join("oxide-templates.json");
 
   if !templates_json.exists() {
-    return Err(anyhow::anyhow!("Template '{}' is not installed", template_name));
+    return Err(anyhow::anyhow!(
+      "Template '{}' is not installed",
+      template_name
+    ));
   }
 
   let content = fs::read_to_string(&templates_json)?;
   let mut templates_info: TemplatesCache = serde_json::from_str(&content)?;
 
-  let exists = templates_info.templates.iter().any(|t| t.name == template_name);
+  let exists = templates_info
+    .templates
+    .iter()
+    .any(|t| t.name == template_name);
   if !exists {
-    return Err(anyhow::anyhow!("Template '{}' is not installed", template_name));
+    return Err(anyhow::anyhow!(
+      "Template '{}' is not installed",
+      template_name
+    ));
   }
 
   templates_info.last_updated = Utc::now().to_rfc3339();

@@ -7,6 +7,9 @@ use url::Url;
 static VALID_NAME_CHARS: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_\-\.]+$").unwrap());
 
+static VALID_TEMPLATE_NAME: LazyLock<Regex> =
+  LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap());
+
 pub fn validate_project_name(name: &str) -> Result<()> {
   if name == "." {
     return Ok(());
@@ -70,6 +73,17 @@ pub fn is_valid_github_repo_url(input: &str) -> Result<()> {
 
   if segments.len() < 2 {
     return Err(anyhow!("URL does not point to a GitHub repository"));
+  }
+
+  Ok(())
+}
+
+pub fn validate_template_name(template_name: &str) -> Result<()> {
+  if !VALID_TEMPLATE_NAME.is_match(template_name) {
+    anyhow::bail!(
+      "Invalid template name '{}'. Allowed characters: a-z, A-Z, 0-9, '-' and '_'",
+      template_name
+    );
   }
 
   Ok(())

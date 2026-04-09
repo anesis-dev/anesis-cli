@@ -14,7 +14,7 @@ use crate::{
   },
   utils::{
     cleanup::setup_ctrlc_handler,
-    validate::{is_valid_github_repo_url, validate_project_name},
+    validate::{is_valid_github_repo_url, validate_project_name, validate_template_name},
   },
 };
 use anyhow::Result;
@@ -65,7 +65,10 @@ async fn main() -> Result<()> {
 
       create_new_project(&ctx, &name, &template_name).await?
     }
-    Commands::InstallTemplate { template_name } => install_template(&ctx, &template_name).await?,
+    Commands::InstallTemplate { template_name } => {
+      validate_template_name(&template_name)?;
+      install_template(&ctx, &template_name).await?
+    }
     Commands::Delete { template_name } => {
       remove_template_from_cache(&ctx.paths.templates, &template_name)?;
     }
