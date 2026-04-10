@@ -32,6 +32,12 @@ impl AppContext {
       .unwrap_or_else(|_| "https://oxide-server.onrender.com".to_string());
     let frontend_url = std::env::var("OXIDE_FRONTEND_URL")
       .unwrap_or_else(|_| "https://oxide-cli.vercel.app".to_string());
-    Self { paths, client, cleanup_state, backend_url, frontend_url }
+    Self {
+      paths,
+      client,
+      cleanup_state,
+      backend_url,
+      frontend_url,
+    }
   }
 }

@@ -7,14 +7,14 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest::AddonManifest;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct AddonsCache {
   #[serde(rename = "lastUpdated")]
   pub last_updated: String,
   pub addons: Vec<CachedAddon>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CachedAddon {
   pub id: String,
   pub name: String,
@@ -115,10 +115,7 @@ pub fn get_installed_addons(addons_dir: &Path) -> Result<()> {
     ]);
   }
 
-  println!(
-    "\nInstalled addons (last updated: {}):",
-    cache.last_updated
-  );
+  println!("\nInstalled addons (last updated: {}):", cache.last_updated);
   println!("{table}");
 
   Ok(())

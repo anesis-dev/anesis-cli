@@ -3,14 +3,17 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::Parser;
 use oxide_cli::{
-  AppContext, CleanupState,
-  addons,
+  AppContext, CleanupState, addons,
   auth::{account::print_user_info, login::login, logout::logout},
   cache::{get_installed_templates, remove_template_from_cache},
-  cli::{Cli, commands::{AddonCommands, Commands, TemplateCommands}},
+  cli::{
+    Cli,
+    commands::{AddonCommands, Commands, TemplateCommands},
+  },
   paths::OxidePaths,
   templates::{
     generator::extract_template, install::install_template, loader::get_files, publish::publish,
+    update::update,
   },
   utils::{
     cleanup::setup_ctrlc_handler,
@@ -33,7 +36,10 @@ async fn main() -> Result<()> {
   let ctx = AppContext::new(oxide_paths, client, cleanup_state);
 
   match cli.command {
-    Commands::New { name, template_name } => {
+    Commands::New {
+      name,
+      template_name,
+    } => {
       validate_project_name(&name)?;
       create_new_project(&ctx, &name, &template_name).await?;
     }
@@ -51,6 +57,9 @@ async fn main() -> Result<()> {
       TemplateCommands::Publish { template_url } => {
         is_valid_github_repo_url(&template_url)?;
         publish(&ctx, &template_url).await?;
+      }
+      TemplateCommands::Update { template_url } => {
+        update(&ctx, &template_url).await?;
       }
     },
     Commands::Login => {
@@ -71,6 +80,14 @@ async fn main() -> Result<()> {
       }
       AddonCommands::Remove { addon_id } => {
         addons::cache::remove_addon_from_cache(&ctx.paths.addons, &addon_id)?;
+      }
+      AddonCommands::Publish { addon_url } => {
+        is_valid_github_repo_url(&addon_url)?;
+        addons::publish::publish_addon(&ctx, &addon_url).await?;
+      }
+      AddonCommands::Update { addon_url } => {
+        is_valid_github_repo_url(&addon_url)?;
+        addons::update::update_addon(&ctx, &addon_url).await?;
       }
     },
     Commands::External(args) => {

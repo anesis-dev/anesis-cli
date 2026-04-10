@@ -6,6 +6,7 @@ pub mod generator;
 pub mod install;
 pub mod loader;
 pub mod publish;
+pub mod update;
 
 pub struct TemplateFile {
   pub path: PathBuf,

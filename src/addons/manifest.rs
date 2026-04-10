@@ -187,7 +187,7 @@ pub struct MoveStep {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Target {
   File { file: String },
   Glob { glob: String },

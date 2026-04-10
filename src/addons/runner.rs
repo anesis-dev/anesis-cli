@@ -1,6 +1,6 @@
 use std::{collections::HashMap, path::Path};
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use inquire::{Confirm, Select, Text};
 
 use crate::{
@@ -15,15 +15,9 @@ use super::{
   lock::{LockEntry, LockFile},
   manifest::{AddonManifest, InputDef, InputType},
   steps::{
-    Rollback,
-    append::execute_append,
-    copy::execute_copy,
-    create::execute_create,
-    delete::execute_delete,
-    inject::execute_inject,
-    move_step::execute_move,
-    rename::execute_rename,
-    replace::execute_replace,
+    Rollback, append::execute_append, copy::execute_copy, create::execute_create,
+    delete::execute_delete, inject::execute_inject, move_step::execute_move,
+    rename::execute_rename, replace::execute_replace,
   },
 };
 use crate::addons::manifest::Step;
@@ -83,11 +77,20 @@ pub async fn run_addon_command(
     .commands
     .iter()
     .find(|c| c.name == command_name)
-    .ok_or_else(|| anyhow!("Command '{}' not found in addon '{}'", command_name, addon_id))?;
+    .ok_or_else(|| {
+      anyhow!(
+        "Command '{}' not found in addon '{}'",
+        command_name,
+        addon_id
+      )
+    })?;
 
   // 3. Check `once` (now that we have the command)
   if command.once && lock.is_command_executed(addon_id, command_name) {
-    println!("Command '{}' has already been executed, skipping.", command_name);
+    println!(
+      "Command '{}' has already been executed, skipping.",
+      command_name
+    );
     return Ok(());
   }
 
@@ -179,12 +182,19 @@ fn collect_inputs(inputs: &[InputDef], map: &mut HashMap<String, String>) -> Res
         prompt.prompt()?
       }
       InputType::Boolean => {
-        let default = input.default.as_deref().map(|d| d == "true").unwrap_or(false);
-        Confirm::new(&input.description).with_default(default).prompt()?.to_string()
+        let default = input
+          .default
+          .as_deref()
+          .map(|d| d == "true")
+          .unwrap_or(false);
+        Confirm::new(&input.description)
+          .with_default(default)
+          .prompt()?
+          .to_string()
       }
-      InputType::Select => {
-        Select::new(&input.description, input.options.clone()).prompt()?.to_string()
-      }
+      InputType::Select => Select::new(&input.description, input.options.clone())
+        .prompt()?
+        .to_string(),
     };
     map.insert(input.name.clone(), value);
   }
