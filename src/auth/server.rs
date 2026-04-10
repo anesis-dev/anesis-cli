@@ -16,6 +16,7 @@ use tokio::{
 use crate::FRONTEND_URL;
 
 type SharedTx = Arc<Mutex<Option<oneshot::Sender<User>>>>;
+type AppState = (SharedTx, String);
 
 #[derive(Serialize, Deserialize)]
 pub struct User {
@@ -23,16 +24,20 @@ pub struct User {
   pub name: String,
 }
 
-pub async fn run_local_auth_server() -> Result<User> {
+/// Starts a one-shot local HTTP server on 127.0.0.1:8080 that waits for the
+/// OAuth callback redirect.  `expected_state` is the CSRF nonce generated
+/// by the caller; the callback validates it before accepting credentials.
+pub async fn run_local_auth_server(expected_state: String) -> Result<User> {
   let notify = Arc::new(Notify::new());
   let notify_clone = notify.clone();
   let (tx, rx) = oneshot::channel::<User>();
 
   let shared_tx: SharedTx = Arc::new(Mutex::new(Some(tx)));
+  let state: AppState = (shared_tx, expected_state);
 
   let app = Router::new()
     .route("/callback", get(callback))
-    .with_state(shared_tx);
+    .with_state(state);
 
   let listener = tokio::net::TcpListener::bind("127.0.0.1:8080").await?;
 
@@ -57,9 +62,17 @@ pub async fn run_local_auth_server() -> Result<User> {
 }
 
 async fn callback(
-  State(shared_tx): State<SharedTx>,
+  State((shared_tx, expected_state)): State<AppState>,
   Query(params): Query<HashMap<String, String>>,
 ) -> Redirect {
+  // Validate CSRF state token.  The backend must forward the `?state=`
+  // query param it received at /auth/cli-login through to this redirect.
+  match params.get("state") {
+    Some(state) if state == &expected_state => {}
+    Some(_) => return Redirect::to(&format!("{}/cli/error?reason=invalid_state", FRONTEND_URL)),
+    None => return Redirect::to(&format!("{}/cli/error?reason=missing_state", FRONTEND_URL)),
+  }
+
   if let Some(token) = params.get("token")
     && let Some(user_name) = params.get("name")
   {

@@ -12,7 +12,7 @@ pub fn setup_ctrlc_handler(
     println!("\n⚠ Interrupted! Cleaning up...");
 
     let cleanup_path = {
-      let guard = cleanup_state.lock().unwrap();
+      let guard = cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
 
       guard.clone()
     };

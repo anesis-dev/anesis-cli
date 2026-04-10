@@ -53,7 +53,7 @@ pub async fn install_template(ctx: &AppContext, template_name: &str) -> Result<(
   let dest = ctx.paths.templates.join(template_name);
 
   {
-    let mut guard = ctx.cleanup_state.lock().unwrap();
+    let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(dest.clone());
   }
 
@@ -66,7 +66,7 @@ pub async fn install_template(ctx: &AppContext, template_name: &str) -> Result<(
   .await?;
 
   {
-    let mut guard = ctx.cleanup_state.lock().unwrap();
+    let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
     *guard = None;
   }
 

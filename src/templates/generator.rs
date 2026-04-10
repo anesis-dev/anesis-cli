@@ -1,9 +1,9 @@
 use std::{
   fs,
-  path::{Path, PathBuf},
+  path::{Component, Path, PathBuf},
 };
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use tera::{Context, Tera};
 
 use crate::templates::TemplateFile;
@@ -16,7 +16,6 @@ pub fn extract_template(files: &[TemplateFile], project_name: &str) -> Result<()
   context.insert("project_name", project_name);
   context.insert("project_name_kebab", &to_kebab_case(project_name));
   context.insert("project_name_snake", &to_snake_case(project_name));
-  context.insert("tauri_user_name", "tauri");
 
   let mut tera = Tera::default();
 
@@ -25,7 +24,7 @@ pub fn extract_template(files: &[TemplateFile], project_name: &str) -> Result<()
   Ok(())
 }
 
-fn to_kebab_case(s: &str) -> String {
+pub fn to_kebab_case(s: &str) -> String {
   s.chars()
     .map(|c| match c {
       '_' | ' ' => '-',
@@ -35,7 +34,7 @@ fn to_kebab_case(s: &str) -> String {
     .to_lowercase()
 }
 
-fn to_snake_case(s: &str) -> String {
+pub fn to_snake_case(s: &str) -> String {
   s.chars()
     .map(|c| match c {
       '-' | ' ' => '_',
@@ -43,6 +42,41 @@ fn to_snake_case(s: &str) -> String {
     })
     .collect::<String>()
     .to_lowercase()
+}
+
+/// Normalises `base.join(relative)` lexically (no filesystem I/O) and
+/// verifies the result stays within `base`.  Prevents path-traversal in
+/// template archives (e.g. `../../.bashrc`).
+fn safe_template_path(base: &Path, relative: &Path) -> Result<PathBuf> {
+  let joined = base.join(relative);
+  let mut out = PathBuf::new();
+  for component in joined.components() {
+    match component {
+      Component::ParentDir => {
+        out.pop();
+      }
+      Component::CurDir => {}
+      c => out.push(c),
+    }
+  }
+  // Normalise base the same way for comparison
+  let mut norm_base = PathBuf::new();
+  for component in base.components() {
+    match component {
+      Component::ParentDir => {
+        norm_base.pop();
+      }
+      Component::CurDir => {}
+      c => norm_base.push(c),
+    }
+  }
+  if !out.starts_with(&norm_base) {
+    return Err(anyhow!(
+      "Path traversal blocked: template file '{}' would escape the output directory",
+      relative.display()
+    ));
+  }
+  Ok(out)
 }
 
 pub fn extract_dir_contents(
@@ -59,7 +93,7 @@ pub fn extract_dir_contents(
     let file_name_str = file_name.to_string_lossy();
     let template_key = file.path.to_string_lossy();
 
-    let output_path = base_path.join(&file.path);
+    let output_path = safe_template_path(base_path, &file.path)?;
     if let Some(parent) = output_path.parent() {
       fs::create_dir_all(parent)?;
     }
