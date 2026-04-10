@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde::Deserialize;
 
 use crate::{
-  AppContext, BACKEND_URL,
+  AppContext,
   auth::token::get_auth_user,
   cache::{get_cached_template, update_templates_cache},
   utils::archive::download_and_extract,
@@ -22,11 +22,12 @@ async fn get_template_info(
   template_name: &str,
   client: &Client,
   auth_path: &Path,
+  backend_url: &str,
 ) -> Result<TemplateInfoRes> {
   let user = get_auth_user(auth_path)?;
 
   let res: TemplateInfoRes = client
-    .get(format!("{BACKEND_URL}/template/{template_name}/url"))
+    .get(format!("{backend_url}/template/{template_name}/url"))
     .bearer_auth(user.token)
     .header("Content-Type", "application/json")
     .send()
@@ -39,7 +40,7 @@ async fn get_template_info(
 }
 
 pub async fn install_template(ctx: &AppContext, template_name: &str) -> Result<()> {
-  let info = get_template_info(template_name, &ctx.client, &ctx.paths.auth).await?;
+  let info = get_template_info(template_name, &ctx.client, &ctx.paths.auth, &ctx.backend_url).await?;
 
   // Skip download if the cached commit matches the server's latest
   if let Some(cached) = get_cached_template(ctx, template_name)?

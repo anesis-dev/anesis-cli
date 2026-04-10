@@ -3,12 +3,9 @@ use std::path::Path;
 use anyhow::Result;
 use inquire::Confirm;
 
-use crate::{
-  BACKEND_URL,
-  auth::{server::run_local_auth_server, token::get_auth_user},
-};
+use crate::auth::{server::run_local_auth_server, token::get_auth_user};
 
-pub async fn login(auth_path: &Path) -> Result<()> {
+pub async fn login(auth_path: &Path, backend_url: &str, frontend_url: &str) -> Result<()> {
   if let Ok(existing) = get_auth_user(auth_path) {
     let proceed = Confirm::new(&format!(
       "Already logged in as @{}. Log in with a different account?",
@@ -26,9 +23,9 @@ pub async fn login(auth_path: &Path) -> Result<()> {
   // NOTE: oxide-server must forward the `?state=` query param it receives
   // at /auth/cli-login through to the localhost callback redirect so that
   // the CSRF check below can validate it.
-  open::that(format!("{}/auth/cli-login?state={}", BACKEND_URL, state))?;
+  open::that(format!("{}/auth/cli-login?state={}", backend_url, state))?;
   println!("Go to your browser for further authorization");
-  let user = run_local_auth_server(state).await?;
+  let user = run_local_auth_server(state, frontend_url).await?;
 
   let auth_json = serde_json::to_string(&user)?;
   write_auth_file(auth_path, &auth_json)?;
@@ -38,17 +35,9 @@ pub async fn login(auth_path: &Path) -> Result<()> {
   Ok(())
 }
 
-/// Generates a single-use state token from process ID + nanosecond timestamp.
-/// Not cryptographically random, but sufficient to prevent CSRF on localhost
-/// since an attacker cannot predict both values within the login window.
+/// Generates a cryptographically random 128-bit state token for CSRF protection.
 fn generate_state_token() -> String {
-  use std::collections::hash_map::DefaultHasher;
-  use std::hash::{Hash, Hasher};
-
-  let mut hasher = DefaultHasher::new();
-  std::time::SystemTime::now().hash(&mut hasher);
-  std::process::id().hash(&mut hasher);
-  format!("{:016x}", hasher.finish())
+  uuid::Uuid::new_v4().simple().to_string()
 }
 
 /// Writes `content` to `path` with owner-only read/write permissions (0600)

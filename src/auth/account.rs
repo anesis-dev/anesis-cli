@@ -1,7 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::{AppContext, BACKEND_URL, auth::token::get_auth_user};
+use crate::{AppContext, auth::token::get_auth_user};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ResponseUser {
@@ -24,7 +24,7 @@ pub async fn get_user_info(ctx: &AppContext) -> Result<ResponseUser> {
 
   let res = ctx
     .client
-    .get(format!("{}/user/info", BACKEND_URL))
+    .get(format!("{}/user/info", ctx.backend_url))
     .header("Authorization", format!("Bearer {}", user.token))
     .send()
     .await?

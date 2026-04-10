@@ -4,7 +4,7 @@ use anyhow::Result;
 use serde::Deserialize;
 
 use crate::{
-  AppContext, BACKEND_URL,
+  AppContext,
   auth::token::get_auth_user,
   utils::archive::download_and_extract,
 };
@@ -25,7 +25,7 @@ async fn get_addon_url(ctx: &AppContext, addon_id: &str) -> Result<AddonUrlRespo
 
   let res: AddonUrlResponse = ctx
     .client
-    .get(format!("{BACKEND_URL}/addon/{addon_id}/url"))
+    .get(format!("{}/addon/{addon_id}/url", ctx.backend_url))
     .bearer_auth(user.token)
     .header("Content-Type", "application/json")
     .send()

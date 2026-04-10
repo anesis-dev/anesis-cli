@@ -1,19 +1,25 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::{AppContext, BACKEND_URL, auth::token::get_auth_user};
+use crate::{AppContext, auth::token::get_auth_user};
 
 #[derive(Deserialize, Serialize)]
 pub struct PublishTemplateDto {
   pub url: String,
 }
 
+#[derive(Deserialize)]
+struct PublishTemplateResponse {
+  message: String,
+  name: String,
+}
+
 pub async fn publish(ctx: &AppContext, template_url: &str) -> Result<()> {
   let user = get_auth_user(&ctx.paths.auth)?;
 
-  let res = ctx
+  let res: PublishTemplateResponse = ctx
     .client
-    .post(format!("{}/template/publish", BACKEND_URL))
+    .post(format!("{}/template/publish", ctx.backend_url))
     .bearer_auth(user.token)
     .header("Content-Type", "application/json")
     .json(&PublishTemplateDto {
@@ -21,9 +27,11 @@ pub async fn publish(ctx: &AppContext, template_url: &str) -> Result<()> {
     })
     .send()
     .await?
-    .error_for_status()?;
+    .error_for_status()?
+    .json()
+    .await?;
 
-  let body: serde_json::Value = res.json().await?;
-  println!("{}", body);
+  println!("✅ {}", res.message);
+  println!("   Template: {}", res.name);
   Ok(())
 }

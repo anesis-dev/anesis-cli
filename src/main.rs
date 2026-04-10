@@ -30,11 +30,7 @@ async fn main() -> Result<()> {
 
   setup_ctrlc_handler(cleanup_state.clone(), oxide_paths.templates.clone())?;
 
-  let ctx = AppContext {
-    paths: oxide_paths,
-    client,
-    cleanup_state,
-  };
+  let ctx = AppContext::new(oxide_paths, client, cleanup_state);
 
   match cli.command {
     Commands::New { name, template_name } => {
@@ -58,7 +54,7 @@ async fn main() -> Result<()> {
       }
     },
     Commands::Login => {
-      login(&ctx.paths.auth).await?;
+      login(&ctx.paths.auth, &ctx.backend_url, &ctx.frontend_url).await?;
     }
     Commands::Logout => {
       logout(&ctx.paths.auth)?;
