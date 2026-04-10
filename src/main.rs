@@ -1,13 +1,13 @@
-use std::{
-  path::PathBuf,
-  sync::{Arc, Mutex},
-  time::Duration,
-};
+use std::time::Duration;
 
-use crate::{
+use anyhow::{Context, Result};
+use clap::Parser;
+use oxide_cli::{
+  AppContext, CleanupState,
+  addons,
   auth::{account::print_user_info, login::login, logout::logout},
   cache::{get_installed_templates, remove_template_from_cache},
-  cli::{Cli, commands::Commands},
+  cli::{Cli, commands::{AddonCommands, Commands, TemplateCommands}},
   paths::OxidePaths,
   templates::{
     generator::extract_template, install::install_template, loader::get_files, publish::publish,
@@ -17,28 +17,8 @@ use crate::{
     validate::{is_valid_github_repo_url, validate_project_name, validate_template_name},
   },
 };
-use anyhow::Result;
-use clap::Parser;
 use reqwest::Client;
-
-mod auth;
-mod cache;
-mod cli;
-mod config;
-mod paths;
-mod templates;
-mod utils;
-
-const BACKEND_URL: &str = "https://oxide-server.onrender.com";
-const FRONTEND_URL: &str = "https://oxide-cli.vercel.app";
-
-pub struct AppContext {
-  pub paths: OxidePaths,
-  pub client: Client,
-  pub cleanup_state: CleanupState,
-}
-
-type CleanupState = Arc<Mutex<Option<PathBuf>>>;
+use std::sync::{Arc, Mutex};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -57,22 +37,26 @@ async fn main() -> Result<()> {
   };
 
   match cli.command {
-    Commands::New {
-      name,
-      template_name,
-    } => {
+    Commands::New { name, template_name } => {
       validate_project_name(&name)?;
-
-      create_new_project(&ctx, &name, &template_name).await?
+      create_new_project(&ctx, &name, &template_name).await?;
     }
-    Commands::InstallTemplate { template_name } => {
-      validate_template_name(&template_name)?;
-      install_template(&ctx, &template_name).await?
-    }
-    Commands::Delete { template_name } => {
-      remove_template_from_cache(&ctx.paths.templates, &template_name)?;
-    }
-    Commands::Installed => get_installed_templates(&ctx.paths.templates)?,
+    Commands::Template { command } => match command {
+      TemplateCommands::Install { template_name } => {
+        validate_template_name(&template_name)?;
+        install_template(&ctx, &template_name).await?;
+      }
+      TemplateCommands::List => {
+        get_installed_templates(&ctx.paths.templates)?;
+      }
+      TemplateCommands::Remove { template_name } => {
+        remove_template_from_cache(&ctx.paths.templates, &template_name)?;
+      }
+      TemplateCommands::Publish { template_url } => {
+        is_valid_github_repo_url(&template_url)?;
+        publish(&ctx, &template_url).await?;
+      }
+    },
     Commands::Login => {
       login(&ctx.paths.auth).await?;
     }
@@ -82,14 +66,28 @@ async fn main() -> Result<()> {
     Commands::Account => {
       print_user_info(&ctx).await?;
     }
-    Commands::PublishTemplate { template_url } => {
-      is_valid_github_repo_url(&template_url)?;
-      publish(&ctx, &template_url).await?;
+    Commands::Addon { command } => match command {
+      AddonCommands::Install { addon_id } => {
+        addons::install::install_addon(&ctx, &addon_id).await?;
+      }
+      AddonCommands::List => {
+        addons::cache::get_installed_addons(&ctx.paths.addons)?;
+      }
+      AddonCommands::Remove { addon_id } => {
+        addons::cache::remove_addon_from_cache(&ctx.paths.addons, &addon_id)?;
+      }
+    },
+    Commands::External(args) => {
+      let addon_id = &args[0];
+      let command_name = args.get(1).context("Usage: oxide <addon-id> <command>")?;
+      let project_root = std::env::current_dir()?;
+      addons::runner::run_addon_command(&ctx, addon_id, command_name, &project_root).await?;
     }
   }
 
   Ok(())
 }
+
 async fn create_new_project(
   ctx: &AppContext,
   project_name: &str,

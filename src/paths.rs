@@ -8,6 +8,8 @@ pub struct OxidePaths {
   pub cache: PathBuf,
   pub templates: PathBuf,
   pub auth: PathBuf,
+  pub addons: PathBuf,
+  pub addons_index: PathBuf,
 }
 
 impl OxidePaths {
@@ -23,6 +25,8 @@ impl OxidePaths {
       cache: oxide_home.join("cache"),
       templates: oxide_home.join("cache").join("templates"),
       auth: oxide_home.join("auth.json"),
+      addons: oxide_home.join("cache").join("addons"),
+      addons_index: oxide_home.join("cache").join("addons").join("oxide-addons.json"),
     })
   }
 
@@ -30,6 +34,7 @@ impl OxidePaths {
     fs::create_dir_all(&self.home)?;
     fs::create_dir_all(&self.cache)?;
     fs::create_dir_all(&self.templates)?;
+    fs::create_dir_all(&self.addons)?;
     Ok(())
   }
 }
