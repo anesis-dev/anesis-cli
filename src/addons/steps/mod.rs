@@ -25,6 +25,11 @@ pub fn render_lines(lines: &[String], ctx: &tera::Context) -> Result<Vec<String>
     .collect()
 }
 
+/// Renders a single string with Tera — used for dynamic file paths.
+pub fn render_string(s: &str, ctx: &tera::Context) -> Result<String> {
+  tera::Tera::one_off(s, ctx, false).map_err(Into::into)
+}
+
 /// Normalises `root.join(relative)` without touching the filesystem by
 /// resolving `.` and `..` components lexically.
 fn normalize_join(root: &Path, relative: &str) -> PathBuf {

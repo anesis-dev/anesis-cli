@@ -3,14 +3,17 @@ use std::{collections::HashMap, path::Path};
 use anyhow::{anyhow, Result};
 use inquire::{Confirm, Select, Text};
 
-use crate::AppContext;
+use crate::{
+  AppContext,
+  templates::generator::{to_camel_case, to_kebab_case, to_pascal_case, to_snake_case},
+};
 
 use super::{
   cache::{get_cached_addon, is_addon_installed},
   detect::detect_variant,
   install::{install_addon, read_cached_manifest},
   lock::{LockEntry, LockFile},
-  manifest::{AddonManifest, InputType},
+  manifest::{AddonManifest, InputDef, InputType},
   steps::{
     Rollback,
     append::execute_append,
@@ -56,38 +59,13 @@ pub async fn run_addon_command(
     }
   }
 
-  // 5. Collect inputs
+  // 5. Collect manifest-level inputs
   let mut input_values: HashMap<String, String> = HashMap::new();
-  for input in &manifest.inputs {
-    let value = match input.input_type {
-      InputType::Text => {
-        let mut prompt = Text::new(&input.description);
-        if let Some(ref default) = input.default {
-          prompt = prompt.with_default(default);
-        }
-        prompt.prompt()?
-      }
-      InputType::Boolean => {
-        let default = input
-          .default
-          .as_deref()
-          .map(|d| d == "true")
-          .unwrap_or(false);
-        let answer = Confirm::new(&input.description).with_default(default).prompt()?;
-        answer.to_string()
-      }
-      InputType::Select => {
-        Select::new(&input.description, input.options.clone()).prompt()?.to_string()
-      }
-    };
-    input_values.insert(input.name.clone(), value);
-  }
+  collect_inputs(&manifest.inputs, &mut input_values)?;
 
-  // 6. Build Tera context
+  // 6. Build Tera context from manifest inputs + derived case variants
   let mut tera_ctx = tera::Context::new();
-  for (k, v) in &input_values {
-    tera_ctx.insert(k, v);
-  }
+  insert_with_derived(&mut tera_ctx, &input_values);
 
   // 7. Detect variant
   let detected_id = detect_variant(&manifest.detect, project_root);
@@ -127,6 +105,11 @@ pub async fn run_addon_command(
     }
   }
 
+  // 5b. Collect command-level inputs and add to context
+  let mut cmd_input_values: HashMap<String, String> = HashMap::new();
+  collect_inputs(&command.inputs, &mut cmd_input_values)?;
+  insert_with_derived(&mut tera_ctx, &cmd_input_values);
+
   // 10. Execute steps
   let addon_dir = ctx.paths.addons.join(addon_id);
   let mut completed_rollbacks: Vec<Rollback> = Vec::new();
@@ -139,8 +122,8 @@ pub async fn run_addon_command(
       Step::Replace(s) => execute_replace(s, project_root, &tera_ctx),
       Step::Append(s) => execute_append(s, project_root, &tera_ctx),
       Step::Delete(s) => execute_delete(s, project_root),
-      Step::Rename(s) => execute_rename(s, project_root),
-      Step::Move(s) => execute_move(s, project_root),
+      Step::Rename(s) => execute_rename(s, project_root, &tera_ctx),
+      Step::Move(s) => execute_move(s, project_root, &tera_ctx),
     };
 
     match result {
@@ -182,6 +165,42 @@ pub async fn run_addon_command(
 
   println!("✓ Command '{}' completed successfully.", command_name);
   Ok(())
+}
+
+/// Prompts for a list of inputs and inserts results into `map`.
+fn collect_inputs(inputs: &[InputDef], map: &mut HashMap<String, String>) -> Result<()> {
+  for input in inputs {
+    let value = match input.input_type {
+      InputType::Text => {
+        let mut prompt = Text::new(&input.description);
+        if let Some(ref default) = input.default {
+          prompt = prompt.with_default(default);
+        }
+        prompt.prompt()?
+      }
+      InputType::Boolean => {
+        let default = input.default.as_deref().map(|d| d == "true").unwrap_or(false);
+        Confirm::new(&input.description).with_default(default).prompt()?.to_string()
+      }
+      InputType::Select => {
+        Select::new(&input.description, input.options.clone()).prompt()?.to_string()
+      }
+    };
+    map.insert(input.name.clone(), value);
+  }
+  Ok(())
+}
+
+/// Inserts every key/value from `map` into `ctx`, plus derived case variants:
+/// `{key}_pascal`, `{key}_camel`, `{key}_kebab`, `{key}_snake`.
+fn insert_with_derived(ctx: &mut tera::Context, map: &HashMap<String, String>) {
+  for (k, v) in map {
+    ctx.insert(k.as_str(), v);
+    ctx.insert(&format!("{k}_pascal"), &to_pascal_case(v));
+    ctx.insert(&format!("{k}_camel"), &to_camel_case(v));
+    ctx.insert(&format!("{k}_kebab"), &to_kebab_case(v));
+    ctx.insert(&format!("{k}_snake"), &to_snake_case(v));
+  }
 }
 
 fn apply_rollback(rollback: Rollback) -> Result<()> {

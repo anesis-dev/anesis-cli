@@ -12,7 +12,8 @@ pub fn execute_create(
   project_root: &Path,
   ctx: &tera::Context,
 ) -> Result<Vec<Rollback>> {
-  let path = super::safe_join(project_root, &step.path, "create path")?;
+  let rendered_path = super::render_string(&step.path, ctx)?;
+  let path = super::safe_join(project_root, &rendered_path, "create path")?;
   let lines: Vec<String> = step.content.lines().map(str::to_string).collect();
   let content = render_lines(&lines, ctx)?.join("\n");
 

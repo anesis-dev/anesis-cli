@@ -44,6 +44,28 @@ pub fn to_snake_case(s: &str) -> String {
     .to_lowercase()
 }
 
+pub fn to_pascal_case(s: &str) -> String {
+  s.split(['_', '-', ' '])
+    .filter(|p| !p.is_empty())
+    .map(|word| {
+      let mut chars = word.chars();
+      match chars.next() {
+        None => String::new(),
+        Some(first) => first.to_uppercase().to_string() + chars.as_str(),
+      }
+    })
+    .collect()
+}
+
+pub fn to_camel_case(s: &str) -> String {
+  let pascal = to_pascal_case(s);
+  let mut chars = pascal.chars();
+  match chars.next() {
+    None => String::new(),
+    Some(first) => first.to_lowercase().to_string() + chars.as_str(),
+  }
+}
+
 /// Normalises `base.join(relative)` lexically (no filesystem I/O) and
 /// verifies the result stays within `base`.  Prevents path-traversal in
 /// template archives (e.g. `../../.bashrc`).

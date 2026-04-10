@@ -6,9 +6,15 @@ use crate::addons::manifest::RenameStep;
 
 use super::Rollback;
 
-pub fn execute_rename(step: &RenameStep, project_root: &Path) -> Result<Vec<Rollback>> {
-  let from = super::safe_join(project_root, &step.from, "rename source")?;
-  let to = super::safe_join(project_root, &step.to, "rename destination")?;
+pub fn execute_rename(
+  step: &RenameStep,
+  project_root: &Path,
+  ctx: &tera::Context,
+) -> Result<Vec<Rollback>> {
+  let rendered_from = super::render_string(&step.from, ctx)?;
+  let rendered_to = super::render_string(&step.to, ctx)?;
+  let from = super::safe_join(project_root, &rendered_from, "rename source")?;
+  let to = super::safe_join(project_root, &rendered_to, "rename destination")?;
 
   if !from.exists() {
     return Err(anyhow!("{} does not exist", from.display()));

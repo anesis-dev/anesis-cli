@@ -110,6 +110,8 @@ pub struct AddonCommand {
   #[serde(default)]
   pub requires_commands: Vec<String>,
   #[serde(default)]
+  pub inputs: Vec<InputDef>,
+  #[serde(default)]
   pub steps: Vec<Step>,
 }
 
