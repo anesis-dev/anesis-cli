@@ -1,14 +1,14 @@
 # Oxide
 
-Oxide is a Rust CLI for scaffolding JavaScript and TypeScript projects from Oxide templates.
+Oxide is a Rust CLI for scaffolding JavaScript and TypeScript projects from remote Oxide templates and extending them with project addons.
 
-It can:
+It supports:
 
-- create a new project from a template
-- download and cache templates locally
-- reuse cached templates between runs
-- authenticate against the Oxide service
-- publish a GitHub repository as an Oxide template
+- creating a new project from a template
+- caching templates locally and skipping unchanged downloads
+- authenticating against the Oxide service
+- publishing GitHub repositories as Oxide templates
+- installing cached addons and running addon commands inside a project
 
 ## Installation
 
@@ -26,39 +26,34 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/oxide-cli/oxide/main/install.ps1 | iex
 ```
 
-Unix installers place the `oxide` binary into `~/.local/bin`, so make sure that directory is in your `PATH`.
+Unix installers place the `oxide` binary in `~/.local/bin`. Cargo installs it in `~/.cargo/bin`. Make sure the relevant directory is in your `PATH`.
 
 ### Install with npm
-
-Install the CLI globally from npm:
 
 ```bash
 npm install -g @maksym-zhuk/oxide-cli
 ```
 
-This package downloads the matching Oxide binary from the latest GitHub release during `postinstall`.
+The npm package downloads the matching prebuilt Oxide binary during `postinstall`.
 
 ### Install with cargo
-
-Install the crate from crates.io:
 
 ```bash
 cargo install oxide-cli
 ```
-
-Cargo installs the `oxide` binary into Cargo's bin directory, so make sure `~/.cargo/bin` is in your `PATH`.
 
 ### Manual install from GitHub Releases
 
 Download the latest release artifact for your platform:
 
 - [Linux x86_64](https://github.com/oxide-cli/oxide/releases/latest/download/oxide-linux-x86_64.tar.gz)
+- [Linux ARM64](https://github.com/oxide-cli/oxide/releases/latest/download/oxide-linux-aarch64.tar.gz)
 - [macOS Apple Silicon](https://github.com/oxide-cli/oxide/releases/latest/download/oxide-macos-aarch64.tar.gz)
 - [Windows x86_64](https://github.com/oxide-cli/oxide/releases/latest/download/oxide-windows-x86_64.zip)
 
 ## Getting started
 
-Log in first:
+Most remote operations require authentication first:
 
 ```bash
 oxide login
@@ -70,42 +65,79 @@ Create a new project from a template:
 oxide new my-app react-vite-ts
 ```
 
-If the template is not cached yet, Oxide downloads the latest version automatically before generating the project.
+If the template is not cached yet, Oxide downloads it automatically before generating the project.
 
-## Commands
+## Command overview
+
+Top-level commands:
 
 ```text
 oxide new <NAME> <TEMPLATE_NAME>
-oxide install-template <TEMPLATE_NAME>
-oxide delete <TEMPLATE_NAME>
-oxide installed
+oxide template <COMMAND>
 oxide login
 oxide logout
 oxide account
-oxide publish-template <TEMPLATE_URL>
+oxide addon <COMMAND>
+oxide <ADDON_ID> <COMMAND>
 ```
 
-### Common workflows
+Template management:
+
+```text
+oxide template install <TEMPLATE_NAME>
+oxide template list
+oxide template remove <TEMPLATE_NAME>
+oxide template publish <GITHUB_REPOSITORY_URL>
+```
+
+Addon management:
+
+```text
+oxide addon install <ADDON_ID>
+oxide addon list
+oxide addon remove <ADDON_ID>
+```
+
+Addon execution:
+
+```text
+oxide <ADDON_ID> <COMMAND>
+```
+
+Example:
+
+```bash
+oxide addon install drizzle
+cd my-app
+oxide drizzle init
+```
+
+Aliases:
+
+- `oxide n ...` for `oxide new ...`
+- `oxide t ...` for `oxide template ...`
+
+## Common workflows
 
 Install or refresh a template in the local cache:
 
 ```bash
-oxide install-template react-vite-ts
+oxide template install react-vite-ts
 ```
 
 List cached templates:
 
 ```bash
-oxide installed
+oxide template list
 ```
 
 Remove a cached template:
 
 ```bash
-oxide delete react-vite-ts
+oxide template remove react-vite-ts
 ```
 
-Show the currently authenticated account:
+Show the authenticated account:
 
 ```bash
 oxide account
@@ -114,27 +146,59 @@ oxide account
 Publish a GitHub repository as a template:
 
 ```bash
-oxide publish-template https://github.com/owner/repo
+oxide template publish https://github.com/owner/repo
 ```
 
-## How templates work
+Install an addon:
 
-- Oxide stores local data under `~/.oxide/`.
-- Cached templates live in `~/.oxide/cache/templates`.
-- Authentication data is stored in `~/.oxide/auth.json`.
-- Template downloads are version-aware: Oxide tracks the remote template commit SHA and skips re-downloading when the cached version is already current.
-- Template files ending with `.tera` are rendered during project generation and written without the `.tera` suffix.
+```bash
+oxide addon install drizzle
+```
+
+List installed addons:
+
+```bash
+oxide addon list
+```
+
+Remove a cached addon:
+
+```bash
+oxide addon remove drizzle
+```
+
+## Local data and generated files
+
+Oxide stores local state under `~/.oxide/`:
+
+- cached templates in `~/.oxide/cache/templates`
+- cached addons in `~/.oxide/cache/addons`
+- template cache index in `~/.oxide/cache/templates/oxide-templates.json`
+- addon cache index in `~/.oxide/cache/addons/oxide-addons.json`
+- authentication data in `~/.oxide/auth.json`
+
+When addon commands run inside a project, Oxide records execution state in `oxide.lock` in the project root.
+
+## Templates
+
+Published templates are expected to include an `oxide.template.json` manifest in the template root. Oxide uses that manifest to track template metadata such as template name, version, source repository, and whether the template is official.
+
+Template files ending with `.tera` are rendered during project generation and written without the `.tera` suffix.
 
 Available template variables:
 
 - `project_name`
 - `project_name_kebab`
 - `project_name_snake`
-- `tauri_user_name`
 
-## Template publishing notes
+## Addons
 
-Published templates are expected to include an `oxide.template.json` manifest in the template root. Oxide uses that manifest to track template metadata such as the template name, version, source repository, and whether the template is official.
+Installed addons are expected to include an `oxide.addon.json` manifest. Oxide uses addon manifests to define:
+
+- user inputs
+- project detection rules
+- command variants
+- file modification steps such as create, copy, inject, replace, append, delete, rename, and move
 
 ## Development
 
