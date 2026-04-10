@@ -1,6 +1,6 @@
 [package]
 name = "oxide-cli"
-version = "0.5.1"
+version = "0.7.0"
 edition = "2024"
 authors = ["Maksym <maksymzhuk759@gmail.com>"]
 description = "⚡ Lightning-fast project scaffolding tool for modern JavaScript/TypeScript development"
