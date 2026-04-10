@@ -210,10 +210,6 @@ pub fn is_template_installed(ctx: &AppContext, template_name: &str) -> Result<bo
     return Ok(false);
   }
 
-  Ok(
-    templates_info
-      .templates
-      .iter()
-      .any(|t| t.name == template_name),
-  )
+  Ok(templates_info.templates.iter().any(|t| t.name == template_name))
 }
+
