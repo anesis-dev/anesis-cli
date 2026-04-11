@@ -2,6 +2,7 @@ pub mod addons;
 pub mod auth;
 pub mod cache;
 pub mod cli;
+pub mod completions;
 pub mod config;
 pub mod paths;
 pub mod templates;

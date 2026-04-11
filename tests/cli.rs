@@ -181,3 +181,90 @@ fn alias_n_for_new() {
     .assert()
     .success();
 }
+
+#[test]
+fn alias_in_for_login() {
+  cmd()
+    .args(["in", "--help"])
+    .assert()
+    .success();
+}
+
+#[test]
+fn alias_out_for_logout() {
+  cmd()
+    .args(["out", "--help"])
+    .assert()
+    .success();
+}
+
+#[test]
+fn alias_a_for_addon() {
+  cmd()
+    .args(["a", "--help"])
+    .assert()
+    .success()
+    .stdout(contains("install"));
+}
+
+// ── completions subcommand ────────────────────────────────────────────────────
+
+#[test]
+fn completions_help() {
+  cmd()
+    .args(["completions", "--help"])
+    .assert()
+    .success()
+    .stdout(contains("SHELL"));
+}
+
+#[test]
+fn completions_missing_arg() {
+  cmd()
+    .arg("completions")
+    .assert()
+    .failure()
+    .stderr(contains("SHELL"));
+}
+
+// ── template subcommand aliases ───────────────────────────────────────────────
+
+#[test]
+fn template_update_missing_arg() {
+  cmd()
+    .args(["template", "update"])
+    .assert()
+    .failure()
+    .stderr(contains("TEMPLATE_URL"));
+}
+
+// ── addon subcommand aliases ──────────────────────────────────────────────────
+
+#[test]
+fn addon_publish_missing_arg() {
+  cmd()
+    .args(["addon", "publish"])
+    .assert()
+    .failure()
+    .stderr(contains("ADDON_URL"));
+}
+
+#[test]
+fn addon_update_missing_arg() {
+  cmd()
+    .args(["addon", "update"])
+    .assert()
+    .failure()
+    .stderr(contains("ADDON_URL"));
+}
+
+// ── version flag ──────────────────────────────────────────────────────────────
+
+#[test]
+fn version_flag() {
+  cmd()
+    .arg("--version")
+    .assert()
+    .success()
+    .stdout(contains("oxide"));
+}

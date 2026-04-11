@@ -5,6 +5,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const zlib = require('zlib');
+const { spawnSync } = require('child_process');
 
 const PLATFORM_MAP = {
   'linux-x64':    { name: 'linux-x86_64',   ext: 'tar.gz', binary: 'oxide'     },
@@ -131,8 +132,20 @@ download(url, (err, buf) => {
       extractZip(buf, dest);
     }
     fs.writeFileSync(versionFile, version);
+    installCompletions(dest);
   } catch (e) {
     console.error(`oxide-cli: extraction failed: ${e.message}`);
     process.exit(1);
   }
 });
+
+function installCompletions(binaryPath) {
+  if (process.platform === 'win32') return;
+  const shell = path.basename(process.env.SHELL || '');
+  if (!shell || !['bash', 'zsh', 'fish'].includes(shell)) return;
+  try {
+    spawnSync(binaryPath, ['completions', shell], { stdio: 'inherit' });
+  } catch (_) {
+    // completions are optional — never fail the install
+  }
+}

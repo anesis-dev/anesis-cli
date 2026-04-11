@@ -1,13 +1,13 @@
 use assert_fs::prelude::*;
 use oxide_cli::addons::{
   manifest::{
-    AppendStep, CreateStep, DeleteStep, IfExists, IfNotFound, InjectStep, MoveStep, RenameStep,
-    ReplaceStep, Target,
+    AppendStep, CopyStep, CreateStep, DeleteStep, IfExists, IfNotFound, InjectStep, MoveStep,
+    RenameStep, ReplaceStep, Target,
   },
   steps::{
-    Rollback, append::execute_append, create::execute_create, delete::execute_delete,
-    inject::execute_inject, move_step::execute_move, rename::execute_rename,
-    replace::execute_replace,
+    Rollback, append::execute_append, copy::execute_copy, create::execute_create,
+    delete::execute_delete, inject::execute_inject, move_step::execute_move,
+    rename::execute_rename, replace::execute_replace, render_lines, render_string,
   },
 };
 
@@ -478,4 +478,318 @@ fn move_target_exists_is_err() {
     to: "b.txt".into(),
   };
   assert!(execute_move(&step, dir.path(), &tera::Context::new()).is_err());
+}
+
+// ── copy ──────────────────────────────────────────────────────────────────────
+
+#[test]
+fn copy_creates_new_file() {
+  let addon_dir = assert_fs::TempDir::new().unwrap();
+  let project_dir = assert_fs::TempDir::new().unwrap();
+  addon_dir.child("template.txt").write_str("hello").unwrap();
+
+  let step = CopyStep {
+    src: "template.txt".into(),
+    dest: "output.txt".into(),
+    if_exists: IfExists::Overwrite,
+  };
+
+  execute_copy(&step, addon_dir.path(), project_dir.path()).unwrap();
+
+  let content = std::fs::read_to_string(project_dir.path().join("output.txt")).unwrap();
+  assert_eq!(content, "hello");
+}
+
+#[test]
+fn copy_new_file_rollback_is_delete_created() {
+  let addon_dir = assert_fs::TempDir::new().unwrap();
+  let project_dir = assert_fs::TempDir::new().unwrap();
+  addon_dir.child("src.txt").write_str("content").unwrap();
+
+  let step = CopyStep {
+    src: "src.txt".into(),
+    dest: "dst.txt".into(),
+    if_exists: IfExists::Overwrite,
+  };
+
+  let rollbacks = execute_copy(&step, addon_dir.path(), project_dir.path()).unwrap();
+  assert!(matches!(rollbacks[0], Rollback::DeleteCreatedFile { .. }));
+}
+
+#[test]
+fn copy_overwrites_existing_file() {
+  let addon_dir = assert_fs::TempDir::new().unwrap();
+  let project_dir = assert_fs::TempDir::new().unwrap();
+  addon_dir.child("template.txt").write_str("new content").unwrap();
+  project_dir.child("output.txt").write_str("old content").unwrap();
+
+  let step = CopyStep {
+    src: "template.txt".into(),
+    dest: "output.txt".into(),
+    if_exists: IfExists::Overwrite,
+  };
+
+  execute_copy(&step, addon_dir.path(), project_dir.path()).unwrap();
+
+  let content = std::fs::read_to_string(project_dir.path().join("output.txt")).unwrap();
+  assert_eq!(content, "new content");
+}
+
+#[test]
+fn copy_overwrite_rollback_is_restore_file() {
+  let addon_dir = assert_fs::TempDir::new().unwrap();
+  let project_dir = assert_fs::TempDir::new().unwrap();
+  addon_dir.child("src.txt").write_str("new").unwrap();
+  project_dir.child("dst.txt").write_str("original").unwrap();
+
+  let step = CopyStep {
+    src: "src.txt".into(),
+    dest: "dst.txt".into(),
+    if_exists: IfExists::Overwrite,
+  };
+
+  let rollbacks = execute_copy(&step, addon_dir.path(), project_dir.path()).unwrap();
+  assert!(matches!(rollbacks[0], Rollback::RestoreFile { .. }));
+}
+
+#[test]
+fn copy_skip_leaves_existing_file_unchanged() {
+  let addon_dir = assert_fs::TempDir::new().unwrap();
+  let project_dir = assert_fs::TempDir::new().unwrap();
+  addon_dir.child("src.txt").write_str("new content").unwrap();
+  project_dir.child("dst.txt").write_str("original").unwrap();
+
+  let step = CopyStep {
+    src: "src.txt".into(),
+    dest: "dst.txt".into(),
+    if_exists: IfExists::Skip,
+  };
+
+  let rollbacks = execute_copy(&step, addon_dir.path(), project_dir.path()).unwrap();
+  assert!(rollbacks.is_empty());
+
+  let content = std::fs::read_to_string(project_dir.path().join("dst.txt")).unwrap();
+  assert_eq!(content, "original");
+}
+
+#[test]
+fn copy_creates_destination_subdirectory() {
+  let addon_dir = assert_fs::TempDir::new().unwrap();
+  let project_dir = assert_fs::TempDir::new().unwrap();
+  addon_dir.child("src.txt").write_str("data").unwrap();
+
+  let step = CopyStep {
+    src: "src.txt".into(),
+    dest: "subdir/dst.txt".into(),
+    if_exists: IfExists::Overwrite,
+  };
+
+  execute_copy(&step, addon_dir.path(), project_dir.path()).unwrap();
+  assert!(project_dir.path().join("subdir/dst.txt").exists());
+}
+
+// ── render_lines ──────────────────────────────────────────────────────────────
+
+#[test]
+fn render_lines_substitutes_variables() {
+  let mut ctx = tera::Context::new();
+  ctx.insert("name", "world");
+  let lines = vec![
+    "Hello, {{ name }}!".to_string(),
+    "Goodbye, {{ name }}.".to_string(),
+  ];
+  let rendered = render_lines(&lines, &ctx).unwrap();
+  assert_eq!(rendered[0], "Hello, world!");
+  assert_eq!(rendered[1], "Goodbye, world.");
+}
+
+#[test]
+fn render_lines_empty_input_returns_empty() {
+  let ctx = tera::Context::new();
+  let rendered = render_lines(&[], &ctx).unwrap();
+  assert!(rendered.is_empty());
+}
+
+#[test]
+fn render_lines_no_variables_unchanged() {
+  let ctx = tera::Context::new();
+  let lines = vec!["plain line".to_string()];
+  let rendered = render_lines(&lines, &ctx).unwrap();
+  assert_eq!(rendered[0], "plain line");
+}
+
+// ── render_string ─────────────────────────────────────────────────────────────
+
+#[test]
+fn render_string_substitutes_variable() {
+  let mut ctx = tera::Context::new();
+  ctx.insert("env", "production");
+  let result = render_string(".env.{{ env }}", &ctx).unwrap();
+  assert_eq!(result, ".env.production");
+}
+
+#[test]
+fn render_string_no_variable_unchanged() {
+  let ctx = tera::Context::new();
+  let result = render_string("plain-string", &ctx).unwrap();
+  assert_eq!(result, "plain-string");
+}
+
+#[test]
+fn render_string_multiple_variables() {
+  let mut ctx = tera::Context::new();
+  ctx.insert("prefix", "my");
+  ctx.insert("suffix", "app");
+  let result = render_string("{{ prefix }}-{{ suffix }}", &ctx).unwrap();
+  assert_eq!(result, "my-app");
+}
+
+// ── path traversal via create ─────────────────────────────────────────────────
+
+#[test]
+fn create_path_traversal_blocked() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let step = CreateStep {
+    path: "../../etc/passwd".into(),
+    content: "evil".into(),
+    if_exists: IfExists::Overwrite,
+  };
+  assert!(execute_create(&step, dir.path(), &empty_ctx()).is_err());
+}
+
+// ── template variables inside step content ────────────────────────────────────
+
+#[test]
+fn inject_content_uses_template_vars() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("app.ts").write_str("// imports\n").unwrap();
+
+  let step = InjectStep {
+    target: Target::File { file: "app.ts".into() },
+    content: "import {{ lib }} from '{{ lib }}';".into(),
+    after: Some("// imports".into()),
+    before: None,
+    if_not_found: IfNotFound::Error,
+  };
+
+  let mut ctx = tera::Context::new();
+  ctx.insert("lib", "cors");
+  execute_inject(&step, dir.path(), &ctx).unwrap();
+
+  let content = std::fs::read_to_string(dir.path().join("app.ts")).unwrap();
+  assert!(content.contains("import cors from 'cors';"));
+}
+
+#[test]
+fn replace_uses_template_var_in_replacement() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("config.ts").write_str("const PORT = 3000;").unwrap();
+
+  let step = ReplaceStep {
+    target: Target::File { file: "config.ts".into() },
+    find: "3000".into(),
+    replace: "{{ port }}".into(),
+    if_not_found: IfNotFound::Error,
+  };
+
+  let mut ctx = tera::Context::new();
+  ctx.insert("port", "4000");
+  execute_replace(&step, dir.path(), &ctx).unwrap();
+
+  let content = std::fs::read_to_string(dir.path().join("config.ts")).unwrap();
+  assert_eq!(content, "const PORT = 4000;");
+}
+
+#[test]
+fn append_uses_template_var_in_content() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("file.txt").write_str("line1").unwrap();
+
+  let step = AppendStep {
+    target: Target::File { file: "file.txt".into() },
+    content: "# added by {{ author }}".into(),
+  };
+
+  let mut ctx = tera::Context::new();
+  ctx.insert("author", "oxide");
+  execute_append(&step, dir.path(), &ctx).unwrap();
+
+  let content = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
+  assert!(content.contains("# added by oxide"));
+}
+
+#[test]
+fn rename_uses_template_vars_in_paths() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("env.example").write_str("data").unwrap();
+
+  let step = RenameStep {
+    from: "{{ src }}".into(),
+    to: "{{ dest }}".into(),
+  };
+
+  let mut ctx = tera::Context::new();
+  ctx.insert("src", "env.example");
+  ctx.insert("dest", ".env.local");
+  execute_rename(&step, dir.path(), &ctx).unwrap();
+
+  assert!(!dir.path().join("env.example").exists());
+  assert!(dir.path().join(".env.local").exists());
+}
+
+#[test]
+fn move_uses_template_vars_in_paths() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("file.txt").write_str("data").unwrap();
+
+  let step = MoveStep {
+    from: "{{ src }}".into(),
+    to: "subdir/{{ dest }}".into(),
+  };
+
+  let mut ctx = tera::Context::new();
+  ctx.insert("src", "file.txt");
+  ctx.insert("dest", "moved.txt");
+  execute_move(&step, dir.path(), &ctx).unwrap();
+
+  assert!(!dir.path().join("file.txt").exists());
+  assert!(dir.path().join("subdir/moved.txt").exists());
+}
+
+#[test]
+fn create_uses_template_var_in_path() {
+  let dir = assert_fs::TempDir::new().unwrap();
+
+  let step = CreateStep {
+    path: ".env.{{ env }}".into(),
+    content: "ENV={{ env }}".into(),
+    if_exists: IfExists::Overwrite,
+  };
+
+  let mut ctx = tera::Context::new();
+  ctx.insert("env", "test");
+  execute_create(&step, dir.path(), &ctx).unwrap();
+
+  let content = std::fs::read_to_string(dir.path().join(".env.test")).unwrap();
+  assert_eq!(content, "ENV=test");
+}
+
+// ── append: trailing newline handling ────────────────────────────────────────
+
+#[test]
+fn append_to_file_with_trailing_newline_no_double_newline() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("file.txt").write_str("line1\n").unwrap();
+
+  let step = AppendStep {
+    target: Target::File { file: "file.txt".into() },
+    content: "line2".into(),
+  };
+
+  execute_append(&step, dir.path(), &empty_ctx()).unwrap();
+
+  let content = std::fs::read_to_string(dir.path().join("file.txt")).unwrap();
+  let lines: Vec<&str> = content.lines().collect();
+  assert_eq!(lines.len(), 2);
+  assert_eq!(lines[1], "line2");
 }

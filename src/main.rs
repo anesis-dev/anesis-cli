@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::Parser;
 use oxide_cli::{
-  AppContext, CleanupState, addons,
+  AppContext, CleanupState, addons, completions,
   auth::{account::print_user_info, login::login, logout::logout},
   cache::{get_installed_templates, remove_template_from_cache},
   cli::{
@@ -90,6 +90,12 @@ async fn main() -> Result<()> {
         addons::update::update_addon(&ctx, &addon_url).await?;
       }
     },
+    Commands::Completions { shell } => {
+      completions::install_completions(&shell)?;
+    }
+    Commands::Complete { addon_id } => {
+      completions::print_dynamic_completions(&ctx.paths.addons, addon_id.as_deref());
+    }
     Commands::External(args) => {
       let addon_id = &args[0];
       let command_name = args.get(1).context("Usage: oxide <addon-id> <command>")?;

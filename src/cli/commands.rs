@@ -92,6 +92,20 @@ pub enum Commands {
     command: AddonCommands,
   },
 
+  #[command(about = "Generate a shell completion script (bash, zsh, fish)")]
+  Completions {
+    #[arg(value_name = "SHELL", help = "Shell to generate completions for: bash, zsh, fish")]
+    shell: String,
+  },
+
+  /// Hidden helper called by the generated completion scripts to produce dynamic completions.
+  /// Not shown in help output.
+  #[command(name = "_complete", hide = true)]
+  Complete {
+    /// Addon ID to list commands for. Omit to list all installed addon IDs.
+    addon_id: Option<String>,
+  },
+
   #[command(external_subcommand)]
   External(Vec<String>),
 }

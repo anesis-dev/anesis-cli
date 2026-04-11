@@ -47,3 +47,12 @@ echo "✓ $APP_NAME installed successfully to $INSTALL_DIR/$APP_NAME"
 echo ""
 echo "Make sure $INSTALL_DIR is in your PATH:"
 echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+echo ""
+
+# Auto-install shell completions
+SHELL_NAME=$(basename "$SHELL" 2>/dev/null)
+case "$SHELL_NAME" in
+    bash|zsh|fish)
+        "$INSTALL_DIR/$APP_NAME" completions "$SHELL_NAME" 2>/dev/null || true
+        ;;
+esac

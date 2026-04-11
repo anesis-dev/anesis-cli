@@ -1,5 +1,31 @@
 use assert_fs::prelude::*;
-use oxide_cli::cache::{TemplatesCache, get_installed_templates, remove_template_from_cache, update_templates_cache};
+use oxide_cli::{
+  AppContext,
+  cache::{
+    TemplatesCache, get_cached_template, get_installed_templates, is_template_installed,
+    remove_template_from_cache, update_templates_cache,
+  },
+  paths::OxidePaths,
+};
+
+fn make_test_ctx(templates_dir: &std::path::Path) -> AppContext {
+  let paths = OxidePaths {
+    home: templates_dir.to_path_buf(),
+    config: templates_dir.join("config.json"),
+    cache: templates_dir.join("cache"),
+    templates: templates_dir.to_path_buf(),
+    auth: templates_dir.join("auth.json"),
+    addons: templates_dir.join("cache").join("addons"),
+    addons_index: templates_dir.join("cache").join("addons").join("oxide-addons.json"),
+  };
+  AppContext {
+    paths,
+    client: reqwest::Client::new(),
+    cleanup_state: std::sync::Arc::new(std::sync::Mutex::new(None)),
+    backend_url: String::new(),
+    frontend_url: String::new(),
+  }
+}
 
 fn write_oxide_template_json(dir: &assert_fs::TempDir, subdir: &str, name: &str) {
   let json = serde_json::json!({
@@ -76,4 +102,81 @@ fn remove_template_not_installed_is_err() {
 fn get_installed_templates_no_file_is_ok() {
   let dir = assert_fs::TempDir::new().unwrap();
   assert!(get_installed_templates(dir.path()).is_ok());
+}
+
+#[test]
+fn get_installed_templates_with_entries_is_ok() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  write_oxide_template_json(&dir, "react-vite", "react-vite");
+  update_templates_cache(dir.path(), std::path::Path::new("react-vite"), "abc").unwrap();
+
+  assert!(get_installed_templates(dir.path()).is_ok());
+}
+
+// ── get_cached_template ───────────────────────────────────────────────────────
+
+#[test]
+fn get_cached_template_returns_entry_when_present() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  write_oxide_template_json(&dir, "react-vite", "react-vite");
+  update_templates_cache(dir.path(), std::path::Path::new("react-vite"), "sha1").unwrap();
+
+  let ctx = make_test_ctx(dir.path());
+  let result = get_cached_template(&ctx, "react-vite").unwrap();
+
+  assert!(result.is_some());
+  let entry = result.unwrap();
+  assert_eq!(entry.name, "react-vite");
+  assert_eq!(entry.commit_sha, "sha1");
+}
+
+#[test]
+fn get_cached_template_returns_none_for_unknown_name() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  write_oxide_template_json(&dir, "react-vite", "react-vite");
+  update_templates_cache(dir.path(), std::path::Path::new("react-vite"), "sha1").unwrap();
+
+  let ctx = make_test_ctx(dir.path());
+  let result = get_cached_template(&ctx, "nonexistent").unwrap();
+
+  assert!(result.is_none());
+}
+
+#[test]
+fn get_cached_template_returns_none_when_no_index() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let ctx = make_test_ctx(dir.path());
+  let result = get_cached_template(&ctx, "react-vite").unwrap();
+  assert!(result.is_none());
+}
+
+// ── is_template_installed ─────────────────────────────────────────────────────
+
+#[test]
+fn is_template_installed_true_when_cached_and_dir_exists() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  write_oxide_template_json(&dir, "react-vite", "react-vite");
+  update_templates_cache(dir.path(), std::path::Path::new("react-vite"), "abc").unwrap();
+
+  let ctx = make_test_ctx(dir.path());
+  assert!(is_template_installed(&ctx, "react-vite").unwrap());
+}
+
+#[test]
+fn is_template_installed_false_when_not_in_cache() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let ctx = make_test_ctx(dir.path());
+  assert!(!is_template_installed(&ctx, "react-vite").unwrap());
+}
+
+#[test]
+fn is_template_installed_false_when_dir_missing() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  write_oxide_template_json(&dir, "react-vite", "react-vite");
+  update_templates_cache(dir.path(), std::path::Path::new("react-vite"), "abc").unwrap();
+  // Remove the directory after caching
+  std::fs::remove_dir_all(dir.path().join("react-vite")).unwrap();
+
+  let ctx = make_test_ctx(dir.path());
+  assert!(!is_template_installed(&ctx, "react-vite").unwrap());
 }
