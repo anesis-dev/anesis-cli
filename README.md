@@ -12,6 +12,18 @@ It supports:
 - upgrading the CLI from GitHub Releases with `oxide upgrade`
 - notifying you when a newer Oxide version is available
 
+## Official website
+
+The official Oxide website is [oxide-cli.vercel.app](https://oxide-cli.vercel.app/).
+
+Use it as the main guide for learning and using Oxide:
+
+- [Docs](https://oxide-cli.vercel.app/docs) cover installation, authentication, templates, addons, publishing, and reference material.
+- [Templates](https://oxide-cli.vercel.app/templates) lists available project starters.
+- [Addons](https://oxide-cli.vercel.app/addons) lists reusable workflow addons.
+
+This README keeps a quick CLI reference for the repository and package users. The website contains the full, up-to-date usage guide.
+
 ## Installation
 
 ### Quick install
