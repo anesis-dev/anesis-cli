@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::{Path, PathBuf}};
 
 use anyhow::Result;
 
@@ -39,4 +39,24 @@ pub fn setup_ctrlc_handler(
   })?;
 
   Ok(())
+}
+
+/// Removes `cleanup_path` and then walks up the tree removing empty parent
+/// directories until `template_root` is reached.
+#[doc(hidden)]
+pub fn cleanup_incomplete_template_for_tests(cleanup_path: &Path, template_root: &Path) {
+  if !cleanup_path.exists() {
+    return;
+  }
+  let _ = fs::remove_dir_all(cleanup_path);
+  let mut current = cleanup_path.parent();
+  while let Some(parent) = current {
+    if parent == template_root {
+      break;
+    }
+    if fs::remove_dir(parent).is_err() {
+      break;
+    }
+    current = parent.parent();
+  }
 }

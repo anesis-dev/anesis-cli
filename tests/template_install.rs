@@ -1,6 +1,9 @@
+mod common;
+
+use common::template_classify_install_state_for_tests;
 use oxide_cli::{
   cache::CachedTemplate,
-  templates::install::{InstallResult, classify_install_state_for_tests},
+  templates::install::InstallResult,
 };
 
 fn cached_template(commit_sha: &str) -> CachedTemplate {
@@ -16,28 +19,28 @@ fn cached_template(commit_sha: &str) -> CachedTemplate {
 
 #[test]
 fn classify_install_state_returns_install_when_template_is_not_cached() {
-  let install_state = classify_install_state_for_tests(None, true, "sha-1");
+  let install_state = template_classify_install_state_for_tests(None, true, "sha-1");
   assert_eq!(install_state, "install");
 }
 
 #[test]
 fn classify_install_state_returns_install_when_directory_is_missing() {
   let cached_template = cached_template("sha-1");
-  let install_state = classify_install_state_for_tests(Some(&cached_template), false, "sha-1");
+  let install_state = template_classify_install_state_for_tests(Some(&cached_template), false, "sha-1");
   assert_eq!(install_state, "install");
 }
 
 #[test]
 fn classify_install_state_returns_up_to_date_when_commit_matches() {
   let cached_template = cached_template("sha-1");
-  let install_state = classify_install_state_for_tests(Some(&cached_template), true, "sha-1");
+  let install_state = template_classify_install_state_for_tests(Some(&cached_template), true, "sha-1");
   assert_eq!(install_state, "up_to_date");
 }
 
 #[test]
 fn classify_install_state_returns_update_when_commit_differs() {
   let cached_template = cached_template("sha-1");
-  let install_state = classify_install_state_for_tests(Some(&cached_template), true, "sha-2");
+  let install_state = template_classify_install_state_for_tests(Some(&cached_template), true, "sha-2");
   assert_eq!(install_state, "update");
 }
 

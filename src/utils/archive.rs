@@ -63,3 +63,30 @@ pub async fn download_and_extract(
 
   Ok(())
 }
+
+/// Strips the archive root component and optional subdir prefix from a raw
+/// entry path, mirroring the extraction logic in `download_and_extract`.
+/// Returns `None` if the entry should be skipped (outside subdir, or empty).
+#[doc(hidden)]
+pub fn strip_archive_path_for_tests(
+  raw_path: &std::path::Path,
+  subdir: Option<&str>,
+) -> Option<std::path::PathBuf> {
+  let mut components = raw_path.components();
+  components.next(); // discard archive root (e.g. owner-repo-sha/)
+  let stripped = components.as_path();
+
+  let rel: std::path::PathBuf = if let Some(dir) = subdir {
+    match stripped.strip_prefix(dir) {
+      Ok(r) => r.to_owned(),
+      Err(_) => return None,
+    }
+  } else {
+    stripped.to_owned()
+  };
+
+  if rel.as_os_str().is_empty() {
+    return None;
+  }
+  Some(rel)
+}

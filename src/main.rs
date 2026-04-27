@@ -47,8 +47,10 @@ async fn run() -> Result<()> {
   setup_ctrlc_handler(cleanup_state.clone(), oxide_paths.templates.clone())?;
 
   let ctx = AppContext::new(oxide_paths, client, cleanup_state);
-  let skip_version_notice =
-    matches!(&cli.command, Commands::Upgrade | Commands::Completions { .. });
+  let skip_version_notice = matches!(
+    &cli.command,
+    Commands::Upgrade | Commands::Completions { .. }
+  );
   let version_check_handle = if skip_version_notice {
     None
   } else {

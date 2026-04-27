@@ -1,5 +1,6 @@
 use std::{fs, path::Path, path::PathBuf};
 
+use assert_fs::prelude::*;
 use oxide_cli::completions::{
   addon_candidates, command_for_paths, powershell_profile_paths_in, template_candidates,
   upsert_managed_block, upsert_zsh_config, zsh_fpath_snippet,
@@ -117,4 +118,101 @@ fn upsert_zsh_config_preserves_existing_content() {
   let content = fs::read_to_string(&config).unwrap();
   assert!(content.contains("export PATH=$PATH:/usr/local/bin"));
   assert!(content.contains("fpath=(/home/user/.zfunc $fpath)"));
+}
+
+// ── upsert_managed_block edge cases ──────────────────────────────────────────
+
+#[test]
+fn upsert_managed_block_normalises_crlf_line_endings() {
+  let original = "line1\r\n\r\n# start\r\nold\r\n# end\r\nline2\r\n";
+  let result = upsert_managed_block(original, "# start\nnew\n# end", "# start", "# end");
+  assert!(!result.contains('\r'), "CRLF should be normalised to LF");
+  assert!(result.contains("new"));
+  assert!(!result.contains("old"));
+}
+
+#[test]
+fn upsert_managed_block_no_trailing_newline_in_content() {
+  let result = upsert_managed_block("", "# start\ncode\n# end", "# start", "# end");
+  assert!(result.ends_with('\n'), "result should end with newline");
+}
+
+#[test]
+fn upsert_managed_block_appends_after_content_without_trailing_newline() {
+  let original = "content without newline";
+  let result = upsert_managed_block(original, "# start\nblock\n# end", "# start", "# end");
+  assert!(result.contains("content without newline"));
+  assert!(result.contains("block"));
+}
+
+// ── template_candidates with real cache data ──────────────────────────────────
+
+#[test]
+fn template_candidates_with_cache_returns_names() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let cache_json = r#"{
+    "lastUpdated": "2026-01-01T00:00:00Z",
+    "templates": [
+      {"name":"react-vite","version":"1.0.0","source":"","path":"react-vite","official":true,"commit_sha":"abc"},
+      {"name":"next-app","version":"2.0.0","source":"","path":"next-app","official":false,"commit_sha":"def"}
+    ]
+  }"#;
+  dir
+    .child("oxide-templates.json")
+    .write_str(cache_json)
+    .unwrap();
+
+  let candidates = template_candidates(Some(dir.path()));
+  let names: Vec<String> = candidates
+    .iter()
+    .map(|c| c.get_value().to_string_lossy().to_string())
+    .collect();
+  assert!(names.contains(&"react-vite".to_string()));
+  assert!(names.contains(&"next-app".to_string()));
+}
+
+#[test]
+fn template_candidates_empty_when_cache_is_corrupt() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("oxide-templates.json")
+    .write_str("not-json")
+    .unwrap();
+  let candidates = template_candidates(Some(dir.path()));
+  assert!(candidates.is_empty());
+}
+
+// ── addon_candidates with real addon data ─────────────────────────────────────
+
+#[test]
+fn addon_candidates_with_cache_returns_ids() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let cache_json = r#"{
+    "lastUpdated": "2026-01-01T00:00:00Z",
+    "addons": [
+      {"id":"drizzle","name":"Drizzle","version":"1.0.0","path":"drizzle","commit_sha":"abc","repo_url":""}
+    ]
+  }"#;
+  dir
+    .child("oxide-addons.json")
+    .write_str(cache_json)
+    .unwrap();
+
+  let candidates = addon_candidates(Some(dir.path()));
+  let ids: Vec<String> = candidates
+    .iter()
+    .map(|c| c.get_value().to_string_lossy().to_string())
+    .collect();
+  assert!(ids.contains(&"drizzle".to_string()));
+}
+
+#[test]
+fn addon_candidates_empty_when_cache_is_corrupt() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("oxide-addons.json")
+    .write_str("bad json")
+    .unwrap();
+  let candidates = addon_candidates(Some(dir.path()));
+  assert!(candidates.is_empty());
 }

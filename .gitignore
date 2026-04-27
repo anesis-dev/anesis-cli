@@ -4,3 +4,4 @@
 CLAUDE.md
 .codex
 src/completions_example.rs
+skills-lock.json

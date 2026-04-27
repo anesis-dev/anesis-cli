@@ -1,6 +1,9 @@
+mod common;
+
+use common::addon_classify_install_state_for_tests;
 use oxide_cli::addons::{
   cache::CachedAddon,
-  install::{AddonInstallResult, classify_install_state_for_tests},
+  install::AddonInstallResult,
   manifest::AddonManifest,
 };
 
@@ -32,28 +35,28 @@ fn manifest(version: &str) -> AddonManifest {
 
 #[test]
 fn classify_install_state_returns_install_when_addon_is_not_cached() {
-  let install_state = classify_install_state_for_tests(None, true, "sha-1");
+  let install_state = addon_classify_install_state_for_tests(None, true, "sha-1");
   assert_eq!(install_state, "install");
 }
 
 #[test]
 fn classify_install_state_returns_install_when_addon_directory_is_missing() {
   let cached_addon = cached_addon("sha-1");
-  let install_state = classify_install_state_for_tests(Some(&cached_addon), false, "sha-1");
+  let install_state = addon_classify_install_state_for_tests(Some(&cached_addon), false, "sha-1");
   assert_eq!(install_state, "install");
 }
 
 #[test]
 fn classify_install_state_returns_up_to_date_when_commit_matches() {
   let cached_addon = cached_addon("sha-1");
-  let install_state = classify_install_state_for_tests(Some(&cached_addon), true, "sha-1");
+  let install_state = addon_classify_install_state_for_tests(Some(&cached_addon), true, "sha-1");
   assert_eq!(install_state, "up_to_date");
 }
 
 #[test]
 fn classify_install_state_returns_update_when_commit_differs() {
   let cached_addon = cached_addon("sha-1");
-  let install_state = classify_install_state_for_tests(Some(&cached_addon), true, "sha-2");
+  let install_state = addon_classify_install_state_for_tests(Some(&cached_addon), true, "sha-2");
   assert_eq!(install_state, "update");
 }
 

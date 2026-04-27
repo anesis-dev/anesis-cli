@@ -497,3 +497,234 @@ fn empty_detect_list_returns_none() {
   let dir = assert_fs::TempDir::new().unwrap();
   assert_eq!(detect_variant(&[], dir.path()), None);
 }
+
+// ── MatchMode::All when one rule fails ────────────────────────────────────────
+
+#[test]
+fn match_mode_all_requires_all_rules_part2() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("package.json").write_str("{}").unwrap();
+  // tsconfig.json is missing → the All block should NOT match
+
+  let detect = vec![DetectBlock {
+    id: "ts-node".into(),
+    rules: vec![
+      DetectRule::FileExists {
+        file: "package.json".into(),
+        negate: false,
+      },
+      DetectRule::FileExists {
+        file: "tsconfig.json".into(),
+        negate: false,
+      },
+    ],
+    match_mode: MatchMode::All,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), None);
+}
+
+// ── JsonContains negate ───────────────────────────────────────────────────────
+
+#[test]
+fn json_contains_negate_matches_when_key_absent() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("package.json")
+    .write_str(r#"{"name":"my-app"}"#)
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-express".into(),
+    rules: vec![DetectRule::JsonContains {
+      file: "package.json".into(),
+      key_path: "dependencies.express".into(),
+      value: None,
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), Some("no-express".into()));
+}
+
+#[test]
+fn json_contains_negate_no_match_when_key_present() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("package.json")
+    .write_str(r#"{"dependencies":{"express":"^4.0.0"}}"#)
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-express".into(),
+    rules: vec![DetectRule::JsonContains {
+      file: "package.json".into(),
+      key_path: "dependencies.express".into(),
+      value: None,
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), None);
+}
+
+// ── TomlContains negate ───────────────────────────────────────────────────────
+
+#[test]
+fn toml_contains_negate_matches_when_key_absent() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("Cargo.toml")
+    .write_str("[package]\nname = \"my-crate\"\n")
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-tokio".into(),
+    rules: vec![DetectRule::TomlContains {
+      file: "Cargo.toml".into(),
+      key_path: "dependencies.tokio".into(),
+      value: None,
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), Some("no-tokio".into()));
+}
+
+#[test]
+fn toml_contains_negate_no_match_when_key_present() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("Cargo.toml")
+    .write_str("[package]\nname = \"my-crate\"\n\n[dependencies]\ntokio = \"1\"\n")
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-tokio".into(),
+    rules: vec![DetectRule::TomlContains {
+      file: "Cargo.toml".into(),
+      key_path: "dependencies.tokio".into(),
+      value: None,
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), None);
+}
+
+// ── YamlContains negate ───────────────────────────────────────────────────────
+
+#[test]
+fn yaml_contains_negate_matches_when_key_absent() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("config.yaml")
+    .write_str("name: my-app\n")
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-database".into(),
+    rules: vec![DetectRule::YamlContains {
+      file: "config.yaml".into(),
+      key_path: "database.host".into(),
+      value: None,
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(
+    detect_variant(&detect, dir.path()),
+    Some("no-database".into())
+  );
+}
+
+#[test]
+fn yaml_contains_negate_no_match_when_key_present() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("config.yaml")
+    .write_str("database:\n  host: localhost\n")
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-database".into(),
+    rules: vec![DetectRule::YamlContains {
+      file: "config.yaml".into(),
+      key_path: "database.host".into(),
+      value: None,
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), None);
+}
+
+// ── JsonContains with numeric value comparison ─────────────────────────────────
+
+#[test]
+fn json_contains_numeric_value_matches_as_string() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("package.json")
+    .write_str(r#"{"engines":{"node":18}}"#)
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "node18".into(),
+    rules: vec![DetectRule::JsonContains {
+      file: "package.json".into(),
+      key_path: "engines.node".into(),
+      value: Some("18".into()),
+      negate: false,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), Some("node18".into()));
+}
+
+// ── FileExists negate with missing file ───────────────────────────────────────
+
+#[test]
+fn file_exists_negate_matches_when_file_absent() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  // no file created → negate=true should match
+
+  let detect = vec![DetectBlock {
+    id: "no-file".into(),
+    rules: vec![DetectRule::FileExists {
+      file: "does-not-exist.txt".into(),
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), Some("no-file".into()));
+}
+
+// ── FileContains negate with missing file ─────────────────────────────────────
+
+#[test]
+fn file_contains_negate_matches_when_file_missing() {
+  // If the file doesn't exist, FileContains evaluates to false.
+  // With negate=true that becomes true.
+  let dir = assert_fs::TempDir::new().unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "no-match".into(),
+    rules: vec![DetectRule::FileContains {
+      file: "missing.txt".into(),
+      contains: "anything".into(),
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), Some("no-match".into()));
+}

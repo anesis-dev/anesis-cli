@@ -16,7 +16,7 @@ use tokio::{
 type SharedTx = Arc<Mutex<Option<oneshot::Sender<User>>>>;
 type AppState = (SharedTx, String, String);
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct User {
   pub token: String,
   pub name: String,

@@ -1,9 +1,11 @@
+mod common;
+
 use chrono::{TimeZone, Utc};
-use oxide_cli::upgrade::{
+use common::{
   asset_filename_for_tests, is_cache_fresh_for_tests, is_newer_version_for_tests,
   normalize_version_tag_for_tests, parse_version_for_tests, release_asset_url_for_tests,
-  render_upgrade_notice,
 };
+use oxide_cli::upgrade::render_upgrade_notice;
 
 #[test]
 fn normalize_version_tag_strips_leading_v() {
@@ -74,4 +76,65 @@ fn render_upgrade_notice_mentions_upgrade_command() {
   let notice = render_upgrade_notice(&latest);
   assert!(notice.contains("Run `oxide upgrade` to update."));
   assert!(notice.contains(&format!("v{} → v{}", env!("CARGO_PKG_VERSION"), latest)));
+}
+
+#[test]
+fn parse_version_succeeds_for_valid_semver() {
+  let result = parse_version_for_tests("1.2.3").unwrap();
+  assert_eq!(result, (1, 2, 3));
+}
+
+#[test]
+fn parse_version_succeeds_for_zero_components() {
+  let result = parse_version_for_tests("0.0.0").unwrap();
+  assert_eq!(result, (0, 0, 0));
+}
+
+#[test]
+fn parse_version_rejects_too_many_components() {
+  assert!(parse_version_for_tests("1.2.3.4").is_err());
+}
+
+#[test]
+fn parse_version_rejects_non_numeric() {
+  assert!(parse_version_for_tests("1.2.beta").is_err());
+}
+
+#[test]
+fn normalize_version_tag_without_v_prefix_is_unchanged() {
+  let version = normalize_version_tag_for_tests("2.5.1").unwrap();
+  assert_eq!(version, "2.5.1");
+}
+
+#[test]
+fn normalize_version_tag_rejects_invalid_semver() {
+  assert!(normalize_version_tag_for_tests("v1.2").is_err());
+}
+
+#[test]
+fn is_newer_version_false_when_equal() {
+  assert!(!is_newer_version_for_tests("1.0.0", "1.0.0").unwrap());
+}
+
+#[test]
+fn is_newer_version_patch_bump() {
+  assert!(is_newer_version_for_tests("1.0.0", "1.0.1").unwrap());
+}
+
+#[test]
+fn is_newer_version_major_bump() {
+  assert!(is_newer_version_for_tests("0.9.9", "1.0.0").unwrap());
+}
+
+#[test]
+fn asset_filename_for_macos_has_no_extension() {
+  assert_eq!(
+    asset_filename_for_tests("macos-aarch64"),
+    "oxide-macos-aarch64"
+  );
+}
+
+#[test]
+fn cache_is_stale_for_invalid_date_format() {
+  assert!(!is_cache_fresh_for_tests("not-a-date", "0.8.0", chrono::Utc::now()));
 }

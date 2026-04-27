@@ -40,6 +40,11 @@ fn generate_state_token() -> String {
   uuid::Uuid::new_v4().simple().to_string()
 }
 
+#[doc(hidden)]
+pub fn generate_state_token_for_tests() -> String {
+  generate_state_token()
+}
+
 /// Writes `content` to `path` with owner-only read/write permissions (0600)
 /// on Unix, preventing other local users from reading the auth token.
 fn write_auth_file(path: &Path, content: &str) -> Result<()> {
@@ -60,4 +65,9 @@ fn write_auth_file(path: &Path, content: &str) -> Result<()> {
     std::fs::write(path, content)?;
   }
   Ok(())
+}
+
+#[doc(hidden)]
+pub fn write_auth_file_for_tests(path: &Path, content: &str) -> Result<()> {
+  write_auth_file(path, content)
 }
