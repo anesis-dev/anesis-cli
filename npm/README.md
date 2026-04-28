@@ -31,13 +31,13 @@ This README keeps a quick CLI reference for the repository and package users. Th
 Linux and macOS:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/anesis-dev/anesis/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/anesis-dev/anesis-cli/main/install.sh | bash
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/anesis-dev/anesis/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/anesis-dev/anesis-cli/main/install.ps1 | iex
 ```
 
 Unix installers place the `anesis` binary in `~/.local/bin`. Cargo installs it in `~/.cargo/bin`. Make sure the relevant directory is in your `PATH`.
@@ -60,10 +60,10 @@ cargo install anesis-cli
 
 Download the latest release artifact for your platform:
 
-- [Linux x86_64](https://github.com/anesis-dev/anesis/releases/latest/download/anesis-linux-x86_64.tar.gz)
-- [Linux ARM64](https://github.com/anesis-dev/anesis/releases/latest/download/anesis-linux-aarch64.tar.gz)
-- [macOS Apple Silicon](https://github.com/anesis-dev/anesis/releases/latest/download/anesis-macos-aarch64.tar.gz)
-- [Windows x86_64](https://github.com/anesis-dev/anesis/releases/latest/download/anesis-windows-x86_64.zip)
+- [Linux x86_64](https://github.com/anesis-dev/anesis-cli/releases/latest/download/anesis-linux-x86_64.tar.gz)
+- [Linux ARM64](https://github.com/anesis-dev/anesis-cli/releases/latest/download/anesis-linux-aarch64.tar.gz)
+- [macOS Apple Silicon](https://github.com/anesis-dev/anesis-cli/releases/latest/download/anesis-macos-aarch64.tar.gz)
+- [Windows x86_64](https://github.com/anesis-dev/anesis-cli/releases/latest/download/anesis-windows-x86_64.zip)
 
 ## Getting started
 

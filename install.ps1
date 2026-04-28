@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $APP_NAME = "oxide"
-$REPO = "anesis-dev/anesis"
+$REPO = "anesis-dev/anesis-cli"
 $ARCH = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "i686" }
 
 Write-Host "Fetching latest version..." -ForegroundColor Cyan

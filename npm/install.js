@@ -20,7 +20,7 @@ if (!platform) {
   console.error(
     `oxide-cli: unsupported platform "${key}". ` +
     `Supported via npm: linux-x64, linux-arm64, darwin-arm64, win32-x64. ` +
-    `Install manually from https://github.com/anesis-dev/anesis/releases`
+    `Install manually from https://github.com/anesis-dev/anesis-cli/releases`
   );
   process.exit(1);
 }
@@ -39,7 +39,7 @@ if (fs.existsSync(dest) && fs.existsSync(versionFile) && fs.readFileSync(version
 fs.mkdirSync(binDir, { recursive: true });
 
 const assetName = `oxide-${platform.name}.${platform.ext}`;
-const url = `https://github.com/anesis-dev/anesis/releases/download/v${version}/${assetName}`;
+const url = `https://github.com/anesis-dev/anesis-cli/releases/download/v${version}/${assetName}`;
 
 console.log(`oxide-cli: downloading ${url}`);
 

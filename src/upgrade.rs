@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppContext;
 
-const RELEASES_API_URL: &str = "https://api.github.com/repos/anesis-dev/anesis/releases/latest";
-const RELEASES_DOWNLOAD_BASE_URL: &str = "https://github.com/anesis-dev/anesis/releases/download";
+const RELEASES_API_URL: &str = "https://api.github.com/repos/anesis-dev/anesis-cli/releases/latest";
+const RELEASES_DOWNLOAD_BASE_URL: &str = "https://github.com/anesis-dev/anesis-cli/releases/download";
 
 #[derive(Debug, Deserialize)]
 struct LatestReleaseResponse {

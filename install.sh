@@ -2,7 +2,7 @@
 set -e
 
 APP_NAME="oxide"
-REPO="anesis-dev/anesis"
+REPO="anesis-dev/anesis-cli"
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 

@@ -42,7 +42,7 @@ fn release_asset_url_uses_expected_github_pattern() {
   let asset_url = release_asset_url_for_tests("1.2.3", "linux-x86_64");
   assert_eq!(
     asset_url,
-    "https://github.com/anesis-dev/anesis/releases/download/v1.2.3/anesis-linux-x86_64"
+    "https://github.com/anesis-dev/anesis-cli/releases/download/v1.2.3/anesis-linux-x86_64"
   );
 }
 
