@@ -1,5 +1,5 @@
 [package]
-name = "anesis-cli"
+name = "anesis"
 version = "0.9.1"
 edition = "2024"
 authors = ["Maksym <maksymzhuk759@gmail.com>"]
