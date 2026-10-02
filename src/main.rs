@@ -26,7 +26,10 @@ use anesis::{
     errors::{AnesisError, exit_code_for, print_error},
     picker::{self, ItemKind, PickItem, pick_one},
     ui::{self, spinner},
-    validate::{is_valid_github_repo_url, validate_project_name, validate_template_name},
+    validate::{
+      ensure_destination_available, is_valid_github_repo_url, validate_project_name,
+      validate_template_name,
+    },
   },
 };
 use anyhow::Result;
@@ -120,6 +123,7 @@ async fn run() -> Result<()> {
       dry_run,
     } => {
       validate_project_name(&name)?;
+      ensure_destination_available(&name, overwrite)?;
       let inputs = parse_inputs(&input)?;
       if let Some(stack_ref) = stack {
         let stack = anesis::stacks::cache::resolve_stack(&ctx, &stack_ref).await?;

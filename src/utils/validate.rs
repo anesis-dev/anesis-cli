@@ -10,6 +10,26 @@ static VALID_NAME_CHARS: LazyLock<Regex> =
 static VALID_TEMPLATE_NAME: LazyLock<Regex> =
   LazyLock::new(|| Regex::new(r"^[a-zA-Z0-9_-]+$").unwrap());
 
+pub fn ensure_destination_available(name: &str, overwrite: bool) -> Result<()> {
+  if name == "." {
+    return Ok(());
+  }
+  let path = Path::new(name);
+  if !path.exists() {
+    return Ok(());
+  }
+  if overwrite && path.is_dir() {
+    return Ok(());
+  }
+  if path.is_dir() {
+    return Err(anyhow!(
+      "Directory '{}' already exists! Pass --overwrite to generate into it.",
+      name
+    ));
+  }
+  Err(anyhow!("'{}' already exists and is not a directory", name))
+}
+
 pub fn validate_project_name(name: &str) -> Result<()> {
   if name == "." {
     return Ok(());
@@ -21,10 +41,6 @@ pub fn validate_project_name(name: &str) -> Result<()> {
 
   if name.len() > 255 {
     return Err(anyhow!("Project name is too long (max 255 characters)"));
-  }
-
-  if Path::new(name).exists() {
-    return Err(anyhow!("Directory '{}' already exists!", name));
   }
 
   let valid_chars = &*VALID_NAME_CHARS;

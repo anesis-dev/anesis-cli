@@ -1372,6 +1372,76 @@ fn packages_step_self_restores_snapshot_files_when_the_install_command_fails() {
   );
 }
 
+#[cfg(unix)]
+fn with_fake_npm<T>(script: &str, body: impl FnOnce() -> T) -> T {
+  use std::os::unix::fs::PermissionsExt;
+
+  let bin_dir = assert_fs::TempDir::new().unwrap();
+  let fake_npm = bin_dir.child("npm");
+  fake_npm.write_str(script).unwrap();
+  std::fs::set_permissions(fake_npm.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+  let previous_path = std::env::var("PATH").unwrap_or_default();
+  unsafe {
+    std::env::set_var(
+      "PATH",
+      format!("{}:{previous_path}", bin_dir.path().display()),
+    )
+  };
+  let out = body();
+  unsafe { std::env::set_var("PATH", previous_path) };
+  out
+}
+
+#[test]
+#[cfg(unix)]
+fn packages_step_records_a_delete_rollback_for_a_lockfile_it_creates() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("package.json")
+    .write_str(r#"{"name":"x"}"#)
+    .unwrap();
+
+  let step = PackagesStep {
+    dependencies: vec!["left-pad".to_string()],
+    dev_dependencies: vec![],
+  };
+  let rollbacks = with_fake_npm("#!/bin/sh\necho created > package-lock.json\n", || {
+    execute_packages(&step, dir.path(), true, true).unwrap()
+  });
+
+  assert!(dir.path().join("package-lock.json").exists());
+  assert!(rollbacks.iter().any(|rb| matches!(
+    rb,
+    Rollback::DeleteCreatedFile { path } if path.ends_with("package-lock.json")
+  )));
+}
+
+#[test]
+#[cfg(unix)]
+fn packages_step_removes_a_lockfile_it_created_when_the_install_fails() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("package.json")
+    .write_str(r#"{"name":"x"}"#)
+    .unwrap();
+
+  let step = PackagesStep {
+    dependencies: vec!["left-pad".to_string()],
+    dev_dependencies: vec![],
+  };
+  let result = with_fake_npm(
+    "#!/bin/sh\necho created > package-lock.json\nexit 1\n",
+    || execute_packages(&step, dir.path(), true, true),
+  );
+
+  assert!(result.is_err());
+  assert!(
+    !dir.path().join("package-lock.json").exists(),
+    "a lockfile created by the failed install must be removed"
+  );
+}
+
 #[test]
 fn run_executes_in_project_root_and_records_irreversible() {
   let dir = assert_fs::TempDir::new().unwrap();

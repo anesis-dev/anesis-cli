@@ -61,6 +61,11 @@ fn is_json_mode_true_for_every_json_flagged_variant() {
     json: true
   }));
   assert!(is_json_mode(&Commands::Outdated { json: true }));
+  assert!(is_json_mode(&Commands::Doctor { json: true }));
+  assert!(is_json_mode(&Commands::Why {
+    path: None,
+    json: true
+  }));
   assert!(is_json_mode(&Commands::Template {
     command: TemplateCommands::List { json: true }
   }));
@@ -93,6 +98,11 @@ fn is_json_mode_true_for_every_json_flagged_variant() {
 #[test]
 fn is_json_mode_false_when_the_json_flag_is_off_or_absent() {
   assert!(!is_json_mode(&Commands::Info { json: false }));
+  assert!(!is_json_mode(&Commands::Doctor { json: false }));
+  assert!(!is_json_mode(&Commands::Why {
+    path: None,
+    json: false
+  }));
   assert!(!is_json_mode(&Commands::Template {
     command: TemplateCommands::List { json: false }
   }));

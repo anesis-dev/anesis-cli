@@ -108,19 +108,8 @@ impl LockFile {
       return;
     };
 
-    // A nonexistent path can't be canonicalize()'d, so it falls back to a raw
-    // starts_with check -- but Path::starts_with is a lexical component-prefix
-    // match, not a resolver: "root/../../etc/passwd" (still literally
-    // containing ParentDir components) satisfies starts_with(root) even
-    // though it escapes. Since relative journal paths on disk (schema v2) are
-    // untrusted input that may not exist yet (e.g. a RestoreFile target that
-    // was already deleted), the fallback must resolve ".."/"." lexically
-    // before the prefix check, or a crafted "../../etc/passwd" sails through.
     let is_inside = |path: &Path| -> bool {
-      path
-        .canonicalize()
-        .unwrap_or_else(|_| lexically_normalize(path))
-        .starts_with(&canon_root)
+      resolve_for_containment(path).is_some_and(|resolved| resolved.starts_with(&canon_root))
     };
 
     for entry in &mut self.addons {
@@ -236,6 +225,24 @@ enum WireRollback {
   IrreversibleRun {
     command: String,
   },
+}
+
+fn resolve_for_containment(path: &Path) -> Option<PathBuf> {
+  let components: Vec<_> = path.components().collect();
+  for split in (1..=components.len()).rev() {
+    let prefix: PathBuf = components[..split].iter().collect();
+    match prefix.canonicalize() {
+      Ok(real) => {
+        let joined = components[split..]
+          .iter()
+          .fold(real, |acc, component| acc.join(component));
+        return Some(lexically_normalize(&joined));
+      }
+      Err(_) if prefix.symlink_metadata().is_ok() => return None,
+      Err(_) => {}
+    }
+  }
+  Some(lexically_normalize(path))
 }
 
 pub(crate) fn lexically_normalize(p: &Path) -> PathBuf {

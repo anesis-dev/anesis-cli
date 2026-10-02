@@ -10,6 +10,8 @@ pub fn is_json_mode(command: &Commands) -> bool {
       | Commands::Status { json: true }
       | Commands::Search { json: true, .. }
       | Commands::Outdated { json: true }
+      | Commands::Doctor { json: true }
+      | Commands::Why { json: true, .. }
       | Commands::Template {
         command: TemplateCommands::List { json: true } | TemplateCommands::Info { json: true, .. }
       }

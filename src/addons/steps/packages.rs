@@ -146,6 +146,8 @@ fn execute_packages_inner(
     let path = project_root.join(name);
     if path.exists() {
       rollbacks.push(Rollback::restore_file(path.clone(), std::fs::read(&path)?));
+    } else {
+      rollbacks.push(Rollback::DeleteCreatedFile { path });
     }
   }
 
@@ -182,8 +184,14 @@ fn execute_packages_inner(
 
   if let Err(err) = result {
     for rb in rollbacks.iter().rev() {
-      if let Rollback::RestoreFile { path, original, .. } = rb {
-        let _ = std::fs::write(path, original);
+      match rb {
+        Rollback::RestoreFile { path, original, .. } => {
+          let _ = std::fs::write(path, original);
+        }
+        Rollback::DeleteCreatedFile { path } => {
+          let _ = std::fs::remove_file(path);
+        }
+        _ => {}
       }
     }
     return Err(err);

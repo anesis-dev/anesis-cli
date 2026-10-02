@@ -323,3 +323,81 @@ fn save_stores_relative_paths_on_disk() {
     2
   );
 }
+
+#[test]
+#[cfg(unix)]
+fn load_drops_nonexistent_path_beneath_a_symlink_pointing_outside_root() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let outside = assert_fs::TempDir::new().unwrap();
+  std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+
+  let mut lock = LockFile::default();
+  lock.upsert_entry(entry_with_journal(
+    "evil",
+    vec![
+      Rollback::DeleteCreatedFile {
+        path: dir.path().join("link/new-file"),
+      },
+      Rollback::RestoreFile {
+        path: dir.path().join("link/deep/new-file"),
+        original: b"x".to_vec(),
+        mode: None,
+        is_symlink: false,
+      },
+      Rollback::RenameFile {
+        from: dir.path().join("a"),
+        to: dir.path().join("link/new-file"),
+      },
+    ],
+  ));
+  lock.save(dir.path()).unwrap();
+
+  let loaded = LockFile::load(dir.path()).unwrap();
+  assert!(
+    loaded.addons[0].commands[0].journal.is_empty(),
+    "paths that resolve outside the root through a symlink must be dropped"
+  );
+}
+
+#[test]
+#[cfg(unix)]
+fn load_drops_a_dangling_symlink_that_points_outside_root() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let outside = assert_fs::TempDir::new().unwrap();
+  std::os::unix::fs::symlink(outside.path().join("missing"), dir.path().join("dangling")).unwrap();
+
+  let mut lock = LockFile::default();
+  lock.upsert_entry(entry_with_journal(
+    "evil",
+    vec![Rollback::RestoreFile {
+      path: dir.path().join("dangling"),
+      original: b"x".to_vec(),
+      mode: None,
+      is_symlink: false,
+    }],
+  ));
+  lock.save(dir.path()).unwrap();
+
+  let loaded = LockFile::load(dir.path()).unwrap();
+  assert!(loaded.addons[0].commands[0].journal.is_empty());
+}
+
+#[test]
+#[cfg(unix)]
+fn load_keeps_nonexistent_path_beneath_a_symlink_that_stays_inside_root() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  std::fs::create_dir(dir.path().join("real")).unwrap();
+  std::os::unix::fs::symlink(dir.path().join("real"), dir.path().join("link")).unwrap();
+
+  let mut lock = LockFile::default();
+  lock.upsert_entry(entry_with_journal(
+    "ok",
+    vec![Rollback::DeleteCreatedFile {
+      path: dir.path().join("link/new-file"),
+    }],
+  ));
+  lock.save(dir.path()).unwrap();
+
+  let loaded = LockFile::load(dir.path()).unwrap();
+  assert_eq!(loaded.addons[0].commands[0].journal.len(), 1);
+}
