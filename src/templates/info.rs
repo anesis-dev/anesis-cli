@@ -1,9 +1,10 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use colored::Colorize;
 
-use crate::{context::AppContext, templates::AnesisTemplate, templates::install::install_template};
+use crate::{
+  context::AppContext, templates::AnesisTemplate, templates::install::install_template, utils::ui,
+};
 
 use super::cache::get_cached_template;
 
@@ -24,20 +25,20 @@ pub async fn template_info(ctx: &AppContext, template_name: &str, json: bool) ->
 
   println!(
     "{} {}",
-    manifest.metadata.display_name.bold(),
-    format!("({})", manifest.name).dimmed()
+    ui::bold(&manifest.metadata.display_name),
+    ui::muted(format!("({})", manifest.name))
   );
   println!(
     "{} {} anesis {}",
-    format!("v{}", manifest.version).cyan(),
-    "·".dimmed(),
+    ui::accent(format!("v{}", manifest.version)),
+    ui::muted("·"),
     manifest.anesis_version
   );
   if !manifest.metadata.description.is_empty() {
     println!("{}", manifest.metadata.description);
   }
   if !manifest.repository.url.is_empty() {
-    println!("{} {}", "repository:".dimmed(), manifest.repository.url);
+    ui::kv("repository", &manifest.repository.url);
   }
   Ok(())
 }

@@ -29,6 +29,9 @@ allow = ["PolyForm-Noncommercial-1.0.0"]
 [bans]
 multiple-versions = "warn"
 wildcards = "deny"
+deny = [
+  { name = "serde_yaml" },
+]
 
 [sources]
 unknown-registry = "deny"

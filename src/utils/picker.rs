@@ -1,7 +1,6 @@
 use std::io::{IsTerminal, Write, stderr};
 
 use anyhow::{Context, Result};
-use colored::Colorize;
 use crossterm::{
   cursor::{Hide, MoveTo, Show},
   event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, read},
@@ -13,7 +12,7 @@ use crossterm::{
 };
 
 use crate::utils::errors::AnesisError;
-use crate::utils::ui::truncate;
+use crate::utils::ui::{self, symbols, truncate};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum ItemKind {
@@ -39,6 +38,22 @@ pub struct PickItem {
   pub meta: String,
   pub description: String,
   pub haystack: String,
+}
+
+pub fn search_results_json(items: &[PickItem], query: Option<&str>) -> Vec<serde_json::Value> {
+  let needle = query.unwrap_or_default().to_lowercase();
+  items
+    .iter()
+    .filter(|i| needle.is_empty() || i.haystack.contains(&needle))
+    .map(|i| {
+      serde_json::json!({
+        "kind": i.kind.tag(),
+        "id": i.id,
+        "name": i.name,
+        "description": i.description,
+      })
+    })
+    .collect()
 }
 
 fn tokenize(query: &str) -> Vec<&str> {
@@ -150,8 +165,8 @@ fn picker_loop(
     };
 
     let mut lines: Vec<String> = Vec::with_capacity(per_page * 3 + 3);
-    lines.push(title.bold().to_string());
-    lines.push(format!("{} {}", "›".dimmed(), filter));
+    lines.push(ui::bold(title));
+    lines.push(format!("{} {}", ui::muted(symbols::chevron()), filter));
     lines.push(String::new());
     for (row_idx, &item_idx) in matches.iter().enumerate().skip(offset).take(per_page) {
       let it = &items[item_idx];
@@ -171,36 +186,34 @@ fn picker_loop(
       if row_idx == selected {
         lines.push(format!(
           "{} {}{}{}",
-          "❯".cyan().bold(),
-          tag.cyan(),
-          it.name.clone().cyan().bold(),
-          it.meta.cyan()
+          ui::accent_bold(symbols::chevron()),
+          ui::accent(&tag),
+          ui::accent_bold(&it.name),
+          ui::accent(&it.meta)
         ));
-        lines.push(format!("    {}", body.cyan()));
+        lines.push(format!("    {}", ui::accent(&body)));
       } else {
         let tag = match it.kind {
-          ItemKind::Template => tag.green(),
-          ItemKind::Addon => tag.magenta(),
-          ItemKind::Stack => tag.blue(),
+          ItemKind::Template => ui::good(&tag),
+          ItemKind::Addon => ui::magenta(&tag),
+          ItemKind::Stack => ui::blue(&tag),
         };
         lines.push(format!(
           "  {}{}{}",
           tag,
-          it.name.clone().bold(),
-          it.meta.dimmed()
+          ui::bold(&it.name),
+          ui::muted(&it.meta)
         ));
-        lines.push(format!("    {}", body.dimmed()));
+        lines.push(format!("    {}", ui::muted(&body)));
       }
       lines.push(String::new());
     }
     if matches.is_empty() {
-      lines.push("  no matches".dimmed().to_string());
+      lines.push(ui::muted("  no matches"));
     }
-    lines.push(
-      "↑↓ move · type to filter · enter select · esc cancel"
-        .dimmed()
-        .to_string(),
-    );
+    lines.push(ui::muted(
+      "↑↓ move · type to filter · enter select · esc cancel",
+    ));
 
     queue!(out, Clear(ClearType::All))?;
     for (row, line) in lines.iter().enumerate() {

@@ -1,11 +1,14 @@
 use anyhow::Result;
-use colored::Colorize;
 
-use crate::{context::AppContext, utils::ui::spinner};
+use crate::{
+  context::AppContext,
+  utils::ui::{self, spinner},
+};
 
 use super::{
   install::{install_addon, read_cached_manifest},
-  manifest::{AddonManifest, InputDef, InputType, Step, Target},
+  manifest::{AddonManifest, InputDef, InputType},
+  runner::step_label,
 };
 
 pub async fn addon_info(ctx: &AppContext, addon_id: &str, json: bool) -> Result<()> {
@@ -32,54 +35,70 @@ pub async fn addon_info(ctx: &AppContext, addon_id: &str, json: bool) -> Result<
 }
 
 fn print_addon_info(m: &AddonManifest) {
-  println!("{} {}", m.name.bold(), format!("({})", m.id).dimmed());
+  println!("{} {}", ui::bold(&m.name), ui::muted(format!("({})", m.id)));
   println!(
     "{} {} {}",
-    format!("v{}", m.version).cyan(),
-    "by".dimmed(),
+    ui::accent(format!("v{}", m.version)),
+    ui::muted("by"),
     m.author
   );
   if !m.description.is_empty() {
     println!("{}", m.description);
   }
   if !m.requires.is_empty() {
-    println!("{} {}", "requires:".dimmed(), m.requires.join(", "));
+    ui::kv("requires", m.requires.join(", "));
   }
 
   for variant in &m.variants {
     let when = variant.when.as_deref().unwrap_or("universal");
-    println!("\n{} {}", "variant".magenta().bold(), when.cyan());
+    println!("\n{} {}", ui::magenta_bold("variant"), ui::accent(when));
     for cmd in &variant.commands {
       let once = if cmd.once {
-        " (once)".dimmed().to_string()
+        ui::muted(" (once)")
       } else {
         String::new()
       };
-      print!("  {} {}{}", "▸".magenta(), cmd.name.bold(), once);
+      print!(
+        "  {} {}{}",
+        ui::magenta(ui::symbols::bullet()),
+        ui::bold(&cmd.name),
+        once
+      );
       if cmd.description.is_empty() {
         println!();
       } else {
-        println!(" {} {}", "—".dimmed(), cmd.description);
+        println!(" {} {}", ui::muted("—"), cmd.description);
       }
       if !cmd.inputs.is_empty() {
-        println!("    {}", "inputs:".dimmed());
+        println!("    {}", ui::muted("inputs:"));
         for input in &cmd.inputs {
           println!("      {}", input_line(input));
         }
       }
       if !cmd.steps.is_empty() {
         let total = cmd.steps.len();
-        println!("    {}", "steps:".dimmed());
+        println!("    {}", ui::muted("steps:"));
         for (idx, step) in cmd.steps.iter().enumerate() {
-          println!(
-            "      {} {}",
-            format!("[{}/{}]", idx + 1, total).dimmed(),
-            step_label(step)
+          let when_suffix = step
+            .when
+            .as_deref()
+            .map(|w| format!(" {}", ui::muted(format!("(when: {w})"))))
+            .unwrap_or_default();
+          print!("      ");
+          ui::step(
+            idx,
+            total,
+            format!("{}{}", step_label(&step.kind), when_suffix),
           );
         }
       }
     }
   }
+}
+
+#[doc(hidden)]
+pub fn input_line_for_tests(input: &InputDef) -> String {
+  input_line(input)
 }
 
 fn input_line(input: &InputDef) -> String {
@@ -103,29 +122,5 @@ fn input_line(input: &InputDef) -> String {
   } else {
     format!(" ({})", extra.join(", "))
   };
-  format!("{}: {}{}", input.name.cyan(), ty, suffix.dimmed())
-}
-
-fn step_label(step: &Step) -> String {
-  fn target(t: &Target) -> &str {
-    match t {
-      Target::File { file } => file,
-      Target::Glob { glob } => glob,
-    }
-  }
-  match step {
-    Step::Copy(s) => format!("copy '{}' → '{}'", s.src, s.dest),
-    Step::Create(s) => format!("create '{}'", s.path),
-    Step::Inject(s) => format!("inject into '{}'", target(&s.target)),
-    Step::Replace(s) => format!("replace in '{}'", target(&s.target)),
-    Step::Append(s) => format!("append to '{}'", target(&s.target)),
-    Step::Delete(s) => format!("delete '{}'", target(&s.target)),
-    Step::Rename(s) => format!("rename '{}' → '{}'", s.from, s.to),
-    Step::Move(s) => format!("move '{}' → '{}'", s.from, s.to),
-    Step::Packages(s) => format!(
-      "install {} package(s)",
-      s.dependencies.len() + s.dev_dependencies.len()
-    ),
-    Step::Run(s) => format!("run '{}'", s.command),
-  }
+  format!("{}: {}{}", ui::accent(&input.name), ty, ui::muted(suffix))
 }

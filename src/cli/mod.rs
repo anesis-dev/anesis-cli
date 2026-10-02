@@ -1,6 +1,7 @@
 use clap::{CommandFactory, Parser};
 
 pub mod commands;
+pub mod dispatch;
 use commands::Commands;
 
 #[derive(Parser)]
@@ -81,6 +82,16 @@ pub struct Cli {
                  terminal, or when NO_COLOR is set."
   )]
   pub no_color: bool,
+
+  #[arg(
+    long,
+    global = true,
+    help = "Use ASCII glyphs instead of Unicode symbols",
+    long_help = "Use ASCII glyphs instead of Unicode symbols.\n\n\
+                 Useful for cmd.exe, non-UTF-8 locales, and CI logs. \
+                 ANESIS_ASCII has the same effect."
+  )]
+  pub ascii: bool,
 }
 
 pub fn parse() -> Cli {

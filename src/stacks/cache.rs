@@ -10,6 +10,7 @@ use super::{
   registry::fetch_stack_manifest,
 };
 use crate::context::AppContext;
+use crate::utils::ui;
 
 pub(crate) fn cached_path(ctx: &AppContext, stack_id: &str) -> PathBuf {
   ctx.paths.stacks.join(format!("{stack_id}.json"))
@@ -31,7 +32,7 @@ pub fn remove_cached_stack(ctx: &AppContext, stack_id: &str) -> Result<()> {
     return Err(anyhow!("Stack '{stack_id}' is not installed locally"));
   }
   fs::remove_file(path)?;
-  println!("✓ Removed stack '{stack_id}'");
+  ui::success(format!("Removed stack '{stack_id}'"));
   Ok(())
 }
 

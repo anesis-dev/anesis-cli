@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "${ANESIS_SKIP_HOOKS:-}" = "1" ]; then
+  echo "pre-push: skipped (ANESIS_SKIP_HOOKS=1)"
+  exit 0
+fi
+
+deleting_only=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+  if [ "$local_sha" != "0000000000000000000000000000000000000000" ]; then
+    deleting_only=0
+  fi
+done
+
+if [ "$deleting_only" = "1" ]; then
+  exit 0
+fi
+
+root="$(git rev-parse --show-toplevel)"
+cd "$root"
+
+run() {
+  echo "pre-push: $*"
+  if ! "$@"; then
+    echo
+    echo "pre-push: FAILED -> $*"
+    echo "pre-push: fix it, or bypass with 'git push --no-verify'"
+    exit 1
+  fi
+}
+
+run cargo fmt --all -- --check
+run cargo clippy --all-targets -- -D warnings
+run cargo nextest run
+
+echo "pre-push: all checks passed"

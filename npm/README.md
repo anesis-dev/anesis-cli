@@ -15,6 +15,11 @@ Supported platforms: `linux-x64`, `linux-arm64`, `darwin-x64`, `darwin-arm64`,
 `win32-x64`. On anything else, use one of the
 [other install methods](https://github.com/anesis-dev/anesis-cli#install).
 
+The download honors `HTTPS_PROXY`/`HTTP_PROXY` (and the npm-config equivalents)
+if set. To skip the download and provide your own binary, set
+`ANESIS_SKIP_INSTALL=1` before installing, then place it at `bin/anesis`
+(`bin/anesis.exe` on Windows) inside this package's install directory.
+
 ## Quick start
 
 ```bash

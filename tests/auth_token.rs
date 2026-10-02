@@ -3,7 +3,7 @@ mod common;
 use anesis::{auth::token::get_auth_user, utils::errors::AnesisError};
 use assert_fs::prelude::*;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use common::is_token_expired_for_tests;
+use common::{get_auth_user_with_token_override_for_tests, is_token_expired_for_tests};
 
 fn token_with_exp(exp: i64) -> String {
   let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"HS256"}"#);
@@ -79,4 +79,40 @@ fn detects_expired_and_valid_tokens() {
   assert!(is_token_expired_for_tests(&token_with_exp(now - 60)));
   assert!(!is_token_expired_for_tests(&token_with_exp(now + 3600)));
   assert!(!is_token_expired_for_tests("not-a-jwt"));
+}
+
+#[test]
+fn anesis_token_env_var_short_circuits_the_auth_file_entirely() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let auth_path = dir.path().join("never-read.json"); // deliberately missing
+
+  let user = get_auth_user_with_token_override_for_tests(&auth_path, Some("env-token"))
+    .expect("ANESIS_TOKEN must be honored even when the auth file doesn't exist");
+  assert_eq!(user.token, "env-token");
+  assert_eq!(user.name, "token");
+}
+
+#[test]
+fn anesis_token_is_trimmed_of_surrounding_whitespace() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let auth_path = dir.path().join("never-read.json");
+
+  let user =
+    get_auth_user_with_token_override_for_tests(&auth_path, Some("  env-token  \n")).unwrap();
+  assert_eq!(user.token, "env-token");
+}
+
+#[test]
+fn an_empty_anesis_token_falls_back_to_the_auth_file() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let auth_file = dir.child("auth.json");
+  auth_file
+    .write_str(r#"{"token":"file-token","name":"alice"}"#)
+    .unwrap();
+
+  let user = get_auth_user_with_token_override_for_tests(auth_file.path(), Some("   ")).unwrap();
+  assert_eq!(
+    user.token, "file-token",
+    "whitespace-only ANESIS_TOKEN must be treated as unset"
+  );
 }

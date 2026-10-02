@@ -12,6 +12,8 @@ jobs:
     check:
         name: Check versions
         runs-on: ubuntu-latest
+        outputs:
+            changelog: ${{ steps.changelog.outputs.body }}
         steps:
             - uses: actions/checkout@v4
 
@@ -23,8 +25,31 @@ jobs:
                   [ "$CARGO_VER" = "$VERSION" ] || { echo "Cargo.toml=$CARGO_VER != tag=$VERSION"; exit 1; }
                   [ "$NPM_VER" = "$VERSION" ] || { echo "npm/package.json=$NPM_VER != tag=$VERSION"; exit 1; }
 
+            - name: Extract this version's CHANGELOG.md entry
+              id: changelog
+              run: |
+                  VERSION="${GITHUB_REF_NAME#v}"
+                  BODY=$(awk -v ver="$VERSION" '
+                    /^## \[/ {
+                      if (found) exit
+                      if ($0 ~ "^## \\[" ver "\\]") { found=1; next }
+                      next
+                    }
+                    found { print }
+                  ' CHANGELOG.md)
+                  BODY=$(printf '%s\n' "$BODY" | sed -e '/./,$!d' -e ':a;/^\n*$/{$d;N;ba}')
+                  if [ -z "$BODY" ]; then
+                    echo "::error::CHANGELOG.md has no '## [$VERSION]' entry — add one before tagging a release."
+                    exit 1
+                  fi
+                  {
+                    echo "body<<CHANGELOG_EOF"
+                    echo "$BODY"
+                    echo "CHANGELOG_EOF"
+                  } >> "$GITHUB_OUTPUT"
+
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
             - name: Verify crates.io packaging
               run: cargo publish --dry-run --locked
@@ -61,7 +86,7 @@ jobs:
               uses: actions/checkout@v4
 
             - name: Install Rust toolchain
-              uses: dtolnay/rust-toolchain@stable
+              uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
               with:
                   targets: ${{ matrix.target }}
 
@@ -72,12 +97,12 @@ jobs:
                   sudo apt-get install -y pkg-config libssl-dev
 
             - name: Cache cargo
-              uses: Swatinem/rust-cache@v2
+              uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
               with:
                   key: ${{ matrix.target }}
 
             - name: Install cargo-nextest
-              uses: taiki-e/install-action@nextest
+              uses: taiki-e/install-action@154e354fb1a868a1e88d0f08c1e5e9118f8f049d # nextest
 
             - name: Run tests
               run: cargo nextest run --all-features --locked --target ${{ matrix.target }}
@@ -98,8 +123,9 @@ jobs:
                   7z a ../../../anesis-${{ matrix.name }}.zip anesis.exe
 
             - name: Upload to release
-              uses: softprops/action-gh-release@v2
+              uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
               with:
+                  body: ${{ needs.check.outputs.changelog }}
                   files: |
                       anesis-*.tar.gz
                       anesis-*.zip
@@ -113,12 +139,44 @@ jobs:
                       anesis-*.zip
                   if-no-files-found: error
 
-    checksums:
-        name: Publish SHA256SUMS
-        needs: build
+    man:
+        name: Publish man pages
+        needs: check
         runs-on: ubuntu-latest
         permissions:
             contents: write
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+
+            - name: Generate man pages
+              run: |
+                  cargo run --release --locked -- man man/
+                  tar czf anesis-man.tar.gz man/
+                  ls man/
+
+            - name: Upload man pages to release
+              uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+              with:
+                  body: ${{ needs.check.outputs.changelog }}
+                  files: anesis-man.tar.gz
+
+            - name: Upload man pages as workflow artifact
+              uses: actions/upload-artifact@v4
+              with:
+                  name: archive-man
+                  path: anesis-man.tar.gz
+                  if-no-files-found: error
+
+    checksums:
+        name: Publish SHA256SUMS
+        needs: [check, build, man]
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+            id-token: write
+            attestations: write
         steps:
             - name: Download all archives
               uses: actions/download-artifact@v4
@@ -133,34 +191,16 @@ jobs:
                   shasum -a 256 anesis-* | sort -k2 > SHA256SUMS
                   cat SHA256SUMS
 
+            - name: Attest provenance for the release archives and SHA256SUMS
+              uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+              with:
+                  subject-path: dist/*
+
             - name: Upload SHA256SUMS to release
-              uses: softprops/action-gh-release@v2
+              uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
               with:
+                  body: ${{ needs.check.outputs.changelog }}
                   files: dist/SHA256SUMS
-
-    man:
-        name: Publish man pages
-        needs: check
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        steps:
-            - uses: actions/checkout@v4
-
-            - uses: dtolnay/rust-toolchain@stable
-
-            # The binary generates its own pages, so they cannot drift from the
-            # command definitions the way a checked-in copy would.
-            - name: Generate man pages
-              run: |
-                  cargo run --release --locked -- man man/
-                  tar czf anesis-man.tar.gz man/
-                  ls man/
-
-            - name: Upload man pages to release
-              uses: softprops/action-gh-release@v2
-              with:
-                  files: anesis-man.tar.gz
 
     packaging:
         name: Update Scoop bucket and Homebrew tap
@@ -228,7 +268,7 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
-            - uses: dtolnay/rust-toolchain@stable
+            - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
             - name: Publish
               run: cargo publish --locked

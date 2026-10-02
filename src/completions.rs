@@ -14,7 +14,7 @@ use clap_complete::{
 };
 
 use crate::{
-  addons::{cache::AddonsCache, manifest::AddonManifest},
+  addons::{self, cache::AddonsCache},
   cli,
   paths::AnesisPaths,
   templates::cache::TemplatesCache,
@@ -258,7 +258,7 @@ fn addon_commands(addons_dir: &Path, addon_path: &str) -> Vec<InstalledAddonComm
   let Ok(content) = fs::read_to_string(&manifest_path) else {
     return Vec::new();
   };
-  let Ok(manifest) = serde_json::from_str::<AddonManifest>(&content) else {
+  let Ok(manifest) = addons::manifest::parse(&content) else {
     return Vec::new();
   };
 
@@ -324,7 +324,7 @@ fn install_bash(script: &str) -> Result<()> {
 }
 
 fn bash_completions_dir() -> Result<PathBuf> {
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".local/share/bash-completion/completions"))
 }
 
@@ -359,7 +359,7 @@ fn zsh_config_file() -> Result<PathBuf> {
     return Ok(path);
   }
 
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".zshrc"))
 }
 
@@ -371,6 +371,7 @@ pub fn upsert_zsh_config(config_path: &Path, fpath_dir: &Path) -> Result<()> {
       return Err(err).with_context(|| format!("Could not read {}", config_path.display()));
     }
   };
+  let existed = config_path.exists();
 
   let snippet = zsh_fpath_snippet(fpath_dir);
   let updated = upsert_managed_block(
@@ -378,7 +379,8 @@ pub fn upsert_zsh_config(config_path: &Path, fpath_dir: &Path) -> Result<()> {
     &snippet,
     "# anesis completions start",
     "# anesis completions end",
-  );
+  )
+  .with_context(|| format!("Refusing to edit {}", config_path.display()))?;
 
   if updated != existing {
     let dir = config_path
@@ -386,7 +388,10 @@ pub fn upsert_zsh_config(config_path: &Path, fpath_dir: &Path) -> Result<()> {
       .context("Zsh config path has no parent directory")?;
     fs::create_dir_all(dir)
       .with_context(|| format!("Could not create directory {}", dir.display()))?;
-    fs::write(config_path, updated)
+    if existed {
+      write_backup(config_path, &existing)?;
+    }
+    crate::utils::atomic::write_atomic(config_path, updated.as_bytes())
       .with_context(|| format!("Could not write {}", config_path.display()))?;
   }
 
@@ -394,10 +399,10 @@ pub fn upsert_zsh_config(config_path: &Path, fpath_dir: &Path) -> Result<()> {
 }
 
 pub fn zsh_fpath_snippet(fpath_dir: &Path) -> String {
-  let dir = fpath_dir.to_string_lossy();
+  let dir = fpath_dir.to_string_lossy().replace('\'', "'\\''");
   format!(
     "# anesis completions start\n\
-fpath=({dir} $fpath)\n\
+fpath=('{dir}' $fpath)\n\
 autoload -Uz compinit && compinit\n\
 # anesis completions end"
   )
@@ -415,7 +420,7 @@ fn zdotdir_completions_dir() -> Option<PathBuf> {
 }
 
 fn home_zfunc_dir() -> Result<PathBuf> {
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".zfunc"))
 }
 
@@ -431,13 +436,12 @@ fn install_fish(script: &str) -> Result<()> {
 }
 
 fn fish_completions_dir() -> Result<PathBuf> {
-  let config_dir = std::env::var("XDG_CONFIG_HOME")
-    .map(PathBuf::from)
-    .unwrap_or_else(|_| {
-      dirs::home_dir()
-        .expect("Could not determine home directory")
-        .join(".config")
-    });
+  let config_dir = match std::env::var("XDG_CONFIG_HOME") {
+    Ok(dir) => PathBuf::from(dir),
+    Err(_) => home_dir()
+      .context("Could not determine home directory")?
+      .join(".config"),
+  };
   Ok(config_dir.join("fish/completions"))
 }
 
@@ -456,13 +460,13 @@ fn install_powershell(script: &str) -> Result<()> {
 }
 
 fn powershell_script_path() -> Result<PathBuf> {
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".anesis").join("completions").join("anesis.ps1"))
 }
 
 fn powershell_profile_paths() -> Result<Vec<PathBuf>> {
   let documents_dir = dirs::document_dir()
-    .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
+    .or_else(|| home_dir().map(|home| home.join("Documents")))
     .context("Could not determine Documents directory")?;
   Ok(powershell_profile_paths_in(&documents_dir))
 }
@@ -492,20 +496,38 @@ fn upsert_powershell_profile(profile_path: &Path, script_path: &Path) -> Result<
       return Err(err).with_context(|| format!("Could not read {}", profile_path.display()));
     }
   };
+  let existed = profile_path.exists();
 
   let updated = upsert_managed_block(
     &existing,
     &powershell_profile_snippet(script_path),
     "# anesis completions start",
     "# anesis completions end",
-  );
+  )
+  .with_context(|| format!("Refusing to edit {}", profile_path.display()))?;
 
   if updated != existing {
-    fs::write(profile_path, updated)
+    if existed {
+      write_backup(profile_path, &existing)?;
+    }
+    crate::utils::atomic::write_atomic(profile_path, updated.as_bytes())
       .with_context(|| format!("Could not write {}", profile_path.display()))?;
   }
 
   Ok(())
+}
+
+fn write_backup(path: &Path, content: &str) -> Result<()> {
+  let mut backup_name = path.as_os_str().to_os_string();
+  backup_name.push(".bak");
+  crate::utils::atomic::write_atomic(Path::new(&backup_name), content.as_bytes()).with_context(
+    || {
+      format!(
+        "Could not write backup {}",
+        PathBuf::from(backup_name).display()
+      )
+    },
+  )
 }
 
 fn powershell_profile_snippet(script_path: &Path) -> String {
@@ -529,20 +551,24 @@ pub fn upsert_managed_block(
   block: &str,
   start_marker: &str,
   end_marker: &str,
-) -> String {
+) -> Result<String> {
   let mut content = content.replace("\r\n", "\n");
   let block = format!("{block}\n");
 
-  if let Some(start) = content.find(start_marker)
-    && let Some(end_rel) = content[start..].find(end_marker)
-  {
+  if let Some(start) = content.find(start_marker) {
+    let Some(end_rel) = content[start..].find(end_marker) else {
+      anyhow::bail!(
+        "found '{start_marker}' without a matching '{end_marker}' — the managed block looks \
+         corrupted, so nothing was changed. Remove the orphaned marker by hand and re-run."
+      );
+    };
     let end_marker_end = start + end_rel + end_marker.len();
     let block_end = content[end_marker_end..]
       .find('\n')
       .map(|idx| end_marker_end + idx + 1)
       .unwrap_or(content.len());
     content.replace_range(start..block_end, &block);
-    return content;
+    return Ok(content);
   }
 
   if !content.is_empty() && !content.ends_with('\n') {
@@ -552,7 +578,7 @@ pub fn upsert_managed_block(
     content.push('\n');
   }
   content.push_str(&block);
-  content
+  Ok(content)
 }
 
 fn write_completion_script(path: &Path, script: &str) -> Result<()> {
@@ -563,4 +589,10 @@ fn write_completion_script(path: &Path, script: &str) -> Result<()> {
     .with_context(|| format!("Could not create directory {}", dir.display()))?;
   fs::write(path, script).with_context(|| format!("Could not write {}", path.display()))?;
   Ok(())
+}
+
+fn home_dir() -> Option<PathBuf> {
+  std::env::var_os("ANESIS_HOME")
+    .map(PathBuf::from)
+    .or_else(dirs::home_dir)
 }

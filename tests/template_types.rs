@@ -1,4 +1,6 @@
-use anesis::templates::{AnesisTemplate, AnesisTemplateMetadata, AnesisTemplateRepository};
+use anesis::templates::{
+  AnesisTemplate, AnesisTemplateAuthor, AnesisTemplateMetadata, AnesisTemplateRepository,
+};
 
 #[test]
 fn anesis_template_deserializes_from_json() {
@@ -20,23 +22,87 @@ fn anesis_template_deserializes_from_json() {
 }
 
 #[test]
-fn anesis_template_serializes_with_camel_case_keys() {
-  let template = AnesisTemplate {
+fn anesis_template_missing_new_fields_still_deserializes_with_defaults() {
+  let json = r#"{
+    "name": "react-vite",
+    "version": "1.0.0",
+    "anesisVersion": "0.9.0",
+    "repository": {"url": "https://github.com/anesis-dev/react-vite"},
+    "metadata": {"displayName": "React + Vite", "description": "React with Vite bundler"}
+  }"#;
+
+  let t: AnesisTemplate = serde_json::from_str(json).unwrap();
+  assert_eq!(t.author.name, "");
+  assert_eq!(t.author.github, "");
+  assert_eq!(t.specialization, "");
+  assert_eq!(t.scope, "");
+  assert!(t.technologies.is_empty());
+  assert!(t.languages.is_empty());
+  assert_eq!(t.template_type, "");
+  assert!(t.metadata.tags.is_empty());
+}
+
+#[test]
+fn anesis_template_deserializes_all_schema_required_fields() {
+  let json = r#"{
+    "name": "react-vite",
+    "version": "1.0.0",
+    "anesisVersion": "0.9.0",
+    "author": {"name": "Anesis", "github": "anesis-dev"},
+    "repository": {"url": "https://github.com/anesis-dev/react-vite"},
+    "specialization": "frontend",
+    "scope": "web",
+    "technologies": ["react", "vite"],
+    "languages": ["typescript"],
+    "type": "base",
+    "metadata": {
+      "displayName": "React + Vite",
+      "description": "React with Vite bundler",
+      "tags": ["react", "vite", "spa"]
+    }
+  }"#;
+
+  let t: AnesisTemplate = serde_json::from_str(json).unwrap();
+  assert_eq!(t.author.name, "Anesis");
+  assert_eq!(t.author.github, "anesis-dev");
+  assert_eq!(t.specialization, "frontend");
+  assert_eq!(t.scope, "web");
+  assert_eq!(t.technologies, vec!["react", "vite"]);
+  assert_eq!(t.languages, vec!["typescript"]);
+  assert_eq!(t.template_type, "base");
+  assert_eq!(t.metadata.tags, vec!["react", "vite", "spa"]);
+}
+
+fn full_template() -> AnesisTemplate {
+  AnesisTemplate {
     name: "next-app".to_string(),
     version: "2.0.0".to_string(),
     anesis_version: "0.8.0".to_string(),
+    author: AnesisTemplateAuthor {
+      name: "Anesis".to_string(),
+      github: "anesis-dev".to_string(),
+    },
     repository: AnesisTemplateRepository {
       url: "https://github.com/example/next-app".to_string(),
     },
+    specialization: "fullstack".to_string(),
+    scope: "web".to_string(),
+    technologies: vec!["next".to_string(), "react".to_string()],
+    languages: vec!["typescript".to_string()],
+    template_type: "base".to_string(),
     metadata: AnesisTemplateMetadata {
       display_name: "Next.js App".to_string(),
       description: "Next.js application template".to_string(),
+      tags: vec!["next".to_string(), "fullstack".to_string()],
     },
     inputs: vec![],
     exclude: vec![],
-  };
+  }
+}
 
-  let json = serde_json::to_string(&template).unwrap();
+#[test]
+fn anesis_template_serializes_with_camel_case_keys() {
+  let json = serde_json::to_string(&full_template()).unwrap();
   assert!(
     json.contains("\"anesisVersion\""),
     "should use anesisVersion key"
@@ -58,24 +124,19 @@ fn anesis_template_serializes_with_camel_case_keys() {
     !json.contains("official"),
     "should not serialize removed official key"
   );
+  assert!(
+    json.contains("\"type\":\"base\""),
+    "template_type must serialize as the bare `type` key, not template_type: {json}"
+  );
+  assert!(
+    !json.contains("template_type"),
+    "should not use the Rust field name for the reserved `type` keyword"
+  );
 }
 
 #[test]
 fn anesis_template_json_round_trip_preserves_all_fields() {
-  let original = AnesisTemplate {
-    name: "svelte-kit".to_string(),
-    version: "3.1.0".to_string(),
-    anesis_version: "0.9.0".to_string(),
-    repository: AnesisTemplateRepository {
-      url: "https://github.com/anesis-dev/svelte-kit".to_string(),
-    },
-    metadata: AnesisTemplateMetadata {
-      display_name: "SvelteKit".to_string(),
-      description: "SvelteKit fullstack template".to_string(),
-    },
-    inputs: vec![],
-    exclude: vec![],
-  };
+  let original = full_template();
 
   let json = serde_json::to_string(&original).unwrap();
   let restored: AnesisTemplate = serde_json::from_str(&json).unwrap();
@@ -83,12 +144,20 @@ fn anesis_template_json_round_trip_preserves_all_fields() {
   assert_eq!(restored.name, original.name);
   assert_eq!(restored.version, original.version);
   assert_eq!(restored.anesis_version, original.anesis_version);
+  assert_eq!(restored.author.name, original.author.name);
+  assert_eq!(restored.author.github, original.author.github);
   assert_eq!(restored.repository.url, original.repository.url);
+  assert_eq!(restored.specialization, original.specialization);
+  assert_eq!(restored.scope, original.scope);
+  assert_eq!(restored.technologies, original.technologies);
+  assert_eq!(restored.languages, original.languages);
+  assert_eq!(restored.template_type, original.template_type);
   assert_eq!(
     restored.metadata.display_name,
     original.metadata.display_name
   );
   assert_eq!(restored.metadata.description, original.metadata.description);
+  assert_eq!(restored.metadata.tags, original.metadata.tags);
 }
 
 #[test]
@@ -107,4 +176,12 @@ fn metadata_deserializes_display_name_camel_case() {
   let meta: AnesisTemplateMetadata = serde_json::from_str(json).unwrap();
   assert_eq!(meta.display_name, "My Template");
   assert_eq!(meta.description, "desc");
+  assert!(meta.tags.is_empty());
+}
+
+#[test]
+fn metadata_deserializes_tags() {
+  let json = r#"{"displayName":"My Template","description":"desc","tags":["a","b"]}"#;
+  let meta: AnesisTemplateMetadata = serde_json::from_str(json).unwrap();
+  assert_eq!(meta.tags, vec!["a", "b"]);
 }

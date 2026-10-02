@@ -186,3 +186,38 @@ fn get_installed_addons_with_addons_is_ok() {
 
   assert!(get_installed_addons(dir.path()).is_ok());
 }
+
+#[test]
+fn update_addons_cache_rejects_manifest_id_mismatch() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let manifest = make_manifest("evil-other-addon");
+
+  let err = update_addons_cache(dir.path(), "requested-addon", &manifest, "sha1")
+    .expect_err("a manifest id that differs from the requested id must be rejected");
+
+  assert!(err.to_string().contains("evil-other-addon"));
+  assert!(
+    get_cached_addon(dir.path(), "requested-addon")
+      .unwrap()
+      .is_none()
+  );
+  assert!(
+    get_cached_addon(dir.path(), "evil-other-addon")
+      .unwrap()
+      .is_none()
+  );
+}
+
+#[test]
+fn update_addons_cache_mismatch_does_not_evict_an_existing_entry() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  update_addons_cache(dir.path(), "A", &make_manifest("A"), "sha-a").unwrap();
+
+  let spoofed = make_manifest("A");
+  let err = update_addons_cache(dir.path(), "B", &spoofed, "sha-b");
+  assert!(err.is_err());
+
+  let a_entry = get_cached_addon(dir.path(), "A").unwrap();
+  assert!(a_entry.is_some(), "the original 'A' entry must survive");
+  assert_eq!(a_entry.unwrap().commit_sha, "sha-a");
+}

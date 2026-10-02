@@ -43,3 +43,29 @@ fn rejects_empty_template_and_addon_id() {
   });
   assert!(validate(&stack).is_err());
 }
+
+#[test]
+fn rejects_a_traversing_template_name() {
+  let mut stack: StackManifest = serde_json::from_str(
+    r#"{"schema_version":"1","id":"s","name":"S","version":"1.0.0",
+        "author":{"name":"Maksym Zhuk","github":"anesis-dev"},"template":"nest"}"#,
+  )
+  .unwrap();
+  stack.template = "../../etc/passwd".into();
+  assert!(validate(&stack).is_err());
+}
+
+#[test]
+fn rejects_a_traversing_addon_id() {
+  let mut stack: StackManifest = serde_json::from_str(
+    r#"{"schema_version":"1","id":"s","name":"S","version":"1.0.0",
+        "author":{"name":"Maksym Zhuk","github":"anesis-dev"},"template":"nest"}"#,
+  )
+  .unwrap();
+  stack.addons.push(StackAddon {
+    id: "../../../tmp/pwned".into(),
+    command: "install".into(),
+    inputs: HashMap::new(),
+  });
+  assert!(validate(&stack).is_err());
+}

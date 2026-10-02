@@ -1,9 +1,15 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use colored::Colorize;
 
-use crate::{addons::lock::LockFile, manifest::AnesisManifest};
+use crate::{
+  addons::{lock::LockFile, summary::ChangeSummary},
+  manifest::AnesisManifest,
+  utils::ui::{
+    self,
+    tree::{TreeNode, render},
+  },
+};
 
 fn load(project_root: &Path) -> Result<(AnesisManifest, LockFile)> {
   let manifest_path = project_root.join("anesis.json");
@@ -18,35 +24,46 @@ fn load(project_root: &Path) -> Result<(AnesisManifest, LockFile)> {
 pub fn print_status(project_root: &Path) -> Result<()> {
   let (manifest, lock) = load(project_root)?;
 
-  println!("{} {}", "template:".dimmed(), manifest.template_name.cyan());
-  println!("{} {}", "sha:".dimmed(), manifest.template_sha);
+  let mut root = TreeNode::new(format!(
+    "{}  {}",
+    ui::accent(&manifest.template_name),
+    ui::muted(&manifest.template_sha)
+  ));
 
   if lock.addons.is_empty() {
-    println!("{} (none)", "addons:".dimmed());
+    println!("{}", root.label);
+    println!("{}", ui::muted("(no addons applied)"));
     return Ok(());
   }
 
-  println!("{}", "addons:".dimmed());
   for entry in &lock.addons {
     let version = if entry.version.is_empty() {
       String::new()
     } else {
-      format!(" v{}", entry.version)
+      format!("v{}", entry.version)
     };
-    println!(
-      "  {}{} [{}]",
-      entry.id.cyan(),
-      version.dimmed(),
-      entry.variant.dimmed()
+    let files: usize = entry
+      .commands
+      .iter()
+      .map(|c| ChangeSummary::from_rollbacks(&c.journal).files_changed())
+      .sum();
+    let ran = entry.commands_executed();
+
+    let mut label = format!(
+      "{}  {}  [{}]",
+      ui::accent(&entry.id),
+      version,
+      entry.variant
     );
-    if !entry.commands_executed.is_empty() {
-      println!(
-        "    {} {}",
-        "ran:".dimmed(),
-        entry.commands_executed.join(", ")
-      );
+    if !ran.is_empty() {
+      label.push_str(&format!("  ran: {}", ran.join(", ")));
     }
+    label.push_str(&format!("  {files} files"));
+
+    root = root.child(TreeNode::new(label));
   }
+
+  println!("{}", render(&root));
   Ok(())
 }
 
@@ -61,7 +78,7 @@ pub fn status_json(project_root: &Path) -> Result<serde_json::Value> {
       "id": e.id,
       "version": e.version,
       "variant": e.variant,
-      "commands_executed": e.commands_executed,
+      "commands_executed": e.commands_executed(),
     })).collect::<Vec<_>>(),
   }))
 }

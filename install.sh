@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 APP_NAME="anesis"
 REPO="anesis-dev/anesis-cli"
@@ -18,7 +18,7 @@ case "$ARCH" in
     *)          echo "Unsupported architecture: $ARCH"; exit 1;;
 esac
 
-LATEST_VERSION=$(curl -sSL https://api.github.com/repos/$REPO/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+LATEST_VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
 
 if [ -z "$LATEST_VERSION" ]; then
     echo "Failed to fetch latest version"
@@ -32,6 +32,7 @@ RELEASE_BASE_URL="https://github.com/$REPO/releases/download/$LATEST_VERSION"
 DOWNLOAD_URL="$RELEASE_BASE_URL/$ASSET"
 
 TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR"' EXIT
 cd "$TMP_DIR"
 
 echo "Downloading from $DOWNLOAD_URL..."
@@ -72,7 +73,6 @@ mv "$APP_NAME" "$INSTALL_DIR/"
 chmod +x "$INSTALL_DIR/$APP_NAME"
 
 cd -
-rm -rf "$TMP_DIR"
 
 echo "✓ $APP_NAME installed successfully to $INSTALL_DIR/$APP_NAME"
 echo ""
@@ -81,7 +81,7 @@ echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
 echo ""
 
 # Auto-install shell completions
-SHELL_NAME=$(basename "$SHELL" 2>/dev/null)
+SHELL_NAME=$(basename "${SHELL:-}" 2>/dev/null || true)
 case "$SHELL_NAME" in
     bash|zsh|fish)
         "$INSTALL_DIR/$APP_NAME" completions "$SHELL_NAME" 2>/dev/null || true

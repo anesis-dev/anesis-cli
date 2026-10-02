@@ -1,27 +1,47 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
-use colored::Colorize;
 use inquire::Confirm;
 
-use crate::addons::manifest::RunStep;
+use crate::{addons::manifest::RunStep, utils::ui};
 
-use super::Rollback;
+use super::{Rollback, StepFailure, StepResult};
 
 pub fn execute_run(
   step: &RunStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
+  non_interactive: bool,
+  allow_run: bool,
+) -> StepResult {
+  execute_run_inner(step, project_root, ctx, non_interactive, allow_run)
+    .map_err(StepFailure::without_rollbacks)
+}
+
+fn execute_run_inner(
+  step: &RunStep,
+  project_root: &Path,
+  ctx: &TemplateContext,
   non_interactive: bool,
   allow_run: bool,
 ) -> Result<Vec<Rollback>> {
   let command = super::render_string(&step.command, ctx)?;
 
   if !step.description.is_empty() {
-    println!("  {}", step.description.dimmed());
+    println!(
+      "  {}",
+      ui::muted(crate::utils::sanitize::sanitize_for_display(
+        &step.description
+      ))
+    );
   }
-  println!("  {} {}", "will run:".dimmed(), command.yellow());
+  println!(
+    "  {} {}",
+    ui::muted("will run:"),
+    ui::yellow(crate::utils::sanitize::sanitize_for_display(&command))
+  );
 
   if !allow_run {
     if non_interactive {

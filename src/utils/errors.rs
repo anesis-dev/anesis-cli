@@ -1,5 +1,6 @@
-use colored::Colorize;
 use thiserror::Error;
+
+use crate::utils::ui;
 
 #[derive(Debug, Error)]
 pub enum AnesisError {
@@ -19,6 +20,8 @@ pub enum AnesisError {
   NetworkTimeout,
   #[error("{0} needs an interactive terminal.")]
   NotATerminal(String),
+  #[error("Aborted. No changes were made.")]
+  Aborted,
 }
 
 pub mod exit_code {
@@ -28,6 +31,7 @@ pub mod exit_code {
   pub const NETWORK: i32 = 4;
   pub const NOT_FOUND: i32 = 5;
   pub const NOT_A_TERMINAL: i32 = 6;
+  pub const ABORTED: i32 = 7;
 }
 
 pub fn exit_code_for(err: &anyhow::Error) -> i32 {
@@ -42,6 +46,7 @@ pub fn exit_code_for(err: &anyhow::Error) -> i32 {
         | AnesisError::NetworkConnect
         | AnesisError::NetworkTimeout => exit_code::NETWORK,
         AnesisError::NotATerminal(_) => exit_code::NOT_A_TERMINAL,
+        AnesisError::Aborted => exit_code::ABORTED,
       };
     }
 
@@ -83,30 +88,59 @@ pub fn classify_reqwest_error(err: reqwest::Error, resource: &str) -> anyhow::Er
     return AnesisError::NetworkTimeout.into();
   }
   if let Some(status) = err.status() {
-    if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-      return AnesisError::HttpUnauthorized.into();
-    }
-    if status == reqwest::StatusCode::NOT_FOUND {
-      return AnesisError::HttpNotFound(resource.to_string()).into();
-    }
-    if status.is_server_error() {
-      return AnesisError::HttpServerError(resource.to_string()).into();
-    }
+    return classify_status(status, resource).into();
   }
   anyhow::anyhow!("Network error while fetching {resource}")
 }
 
+fn classify_status(status: reqwest::StatusCode, resource: &str) -> AnesisError {
+  if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+    AnesisError::HttpUnauthorized
+  } else if status == reqwest::StatusCode::NOT_FOUND {
+    AnesisError::HttpNotFound(resource.to_string())
+  } else {
+    AnesisError::HttpServerError(resource.to_string())
+  }
+}
+
+#[derive(serde::Deserialize)]
+struct ServerErrorBody {
+  message: String,
+}
+
+pub async fn check_response(
+  response: reqwest::Response,
+  resource: &str,
+) -> Result<reqwest::Response, anyhow::Error> {
+  if response.status().is_success() {
+    return Ok(response);
+  }
+
+  let status = response.status();
+  let body_text = response.text().await.unwrap_or_default();
+  let server_message = serde_json::from_str::<ServerErrorBody>(&body_text)
+    .ok()
+    .map(|b| b.message)
+    .filter(|m| !m.trim().is_empty());
+
+  let base: anyhow::Error = classify_status(status, resource).into();
+  Err(match server_message {
+    Some(msg) => base.context(msg),
+    None => base,
+  })
+}
+
 pub fn print_error(err: &anyhow::Error) {
   if std::env::var("ANESIS_DEBUG").is_ok() {
-    eprintln!("{} {:?}", "error:".red().bold(), err);
+    ui::error_header(format!("{err:?}"));
     return;
   }
 
   for cause in err.chain() {
     if let Some(anesis_err) = cause.downcast_ref::<AnesisError>() {
-      eprintln!("{} {}", "error:".red().bold(), err);
+      ui::error_header(err);
       if let Some(hint) = hint_for_anesis_error(anesis_err) {
-        eprintln!("  {} {}", "hint:".cyan().bold(), hint);
+        ui::hint_line(hint);
       }
       return;
     }
@@ -114,14 +148,10 @@ pub fn print_error(err: &anyhow::Error) {
 
   for cause in err.chain() {
     if is_not_a_tty(cause) {
-      eprintln!(
-        "{} This command needs an interactive terminal, and there isn't one.",
-        "error:".red().bold()
-      );
-      eprintln!(
-        "  {} Pass `--yes` to accept defaults, and `--input NAME=VALUE` for each value \
+      ui::error_header("This command needs an interactive terminal, and there isn't one.");
+      ui::hint_line(
+        "Pass `--yes` to accept defaults, and `--input NAME=VALUE` for each value \
          the command would have asked for.",
-        "hint:".cyan().bold()
       );
       return;
     }
@@ -130,22 +160,18 @@ pub fn print_error(err: &anyhow::Error) {
   for cause in err.chain() {
     if let Some(reqwest_err) = cause.downcast_ref::<reqwest::Error>() {
       if err.downcast_ref::<reqwest::Error>().is_some() {
-        eprintln!(
-          "{} {}",
-          "error:".red().bold(),
-          friendly_reqwest_message(reqwest_err)
-        );
+        ui::error_header(friendly_reqwest_message(reqwest_err));
       } else {
-        eprintln!("{} {}", "error:".red().bold(), err);
+        ui::error_header(err);
       }
       if let Some(hint) = hint_for_reqwest_error(reqwest_err) {
-        eprintln!("  {} {}", "hint:".cyan().bold(), hint);
+        ui::hint_line(hint);
       }
       return;
     }
   }
 
-  eprintln!("{} {}", "error:".red().bold(), err);
+  ui::error_header(err);
 }
 
 fn hint_for_anesis_error(err: &AnesisError) -> Option<&'static str> {
@@ -164,6 +190,7 @@ fn hint_for_anesis_error(err: &AnesisError) -> Option<&'static str> {
     AnesisError::NotATerminal(_) => Some(
       "Pass `--yes` to accept defaults, and `--input NAME=VALUE` for each value the addon needs.",
     ),
+    AnesisError::Aborted => None,
   }
 }
 

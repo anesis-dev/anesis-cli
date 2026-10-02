@@ -1,5 +1,6 @@
 use std::{fs, path::Path};
 
+use crate::utils::ui;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
@@ -24,7 +25,7 @@ impl AnesisManifest {
 
     let bytes = serde_json::to_vec_pretty(&self)?;
     fs::write(&output_path, bytes)?;
-    println!("  ✓ {}", output_path.display());
+    println!("  {} {}", ui::symbols::ok(), output_path.display());
     Ok(())
   }
 

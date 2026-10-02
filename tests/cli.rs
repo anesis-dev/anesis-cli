@@ -1,4 +1,5 @@
 use assert_cmd::Command;
+use predicates::prelude::PredicateBooleanExt;
 use predicates::str::contains;
 
 fn cmd() -> Command {
@@ -12,6 +13,19 @@ fn help_flag() {
     .assert()
     .success()
     .stdout(contains("Usage"));
+}
+
+#[test]
+fn ascii_flag_swaps_unicode_glyphs_for_ascii() {
+  let home = assert_fs::TempDir::new().unwrap();
+  cmd()
+    .env("ANESIS_HOME", home.path())
+    .env_remove("ANESIS_TOKEN")
+    .args(["--ascii", "info"])
+    .assert()
+    .success()
+    .stdout(contains("[x] not logged in"))
+    .stdout(contains("✗").not());
 }
 
 #[test]
@@ -35,8 +49,17 @@ fn top_level_help_lists_visible_aliases() {
     .stdout(contains("[aliases: a]"))
     .stdout(contains("[aliases: s]"))
     .stdout(contains("[aliases: in]"))
-    .stdout(contains("[aliases: out]"))
-    .stdout(contains("[aliases: doctor]"));
+    .stdout(contains("[aliases: out]"));
+}
+
+#[test]
+fn doctor_is_a_real_command_not_an_info_alias() {
+  cmd()
+    .arg("--help")
+    .assert()
+    .success()
+    .stdout(contains("doctor"))
+    .stdout(contains("Diagnose"));
 }
 
 #[test]
@@ -110,6 +133,24 @@ fn template_publish_missing_arg() {
 }
 
 #[test]
+fn template_publish_rejects_a_non_github_url() {
+  cmd()
+    .args(["template", "publish", "https://gitlab.com/owner/repo"])
+    .assert()
+    .failure()
+    .stderr(contains("GitHub"));
+}
+
+#[test]
+fn template_republish_rejects_a_non_github_url() {
+  cmd()
+    .args(["template", "republish", "https://gitlab.com/owner/repo"])
+    .assert()
+    .failure()
+    .stderr(contains("GitHub"));
+}
+
+#[test]
 fn template_unknown_subcommand() {
   cmd()
     .args(["template", "frobnicate"])
@@ -127,7 +168,8 @@ fn addon_help() {
     .stdout(contains("Manage addons"))
     .stdout(contains("install"))
     .stdout(contains("list"))
-    .stdout(contains("remove"));
+    .stdout(contains("remove"))
+    .stdout(contains("lint"));
 }
 
 #[test]
@@ -354,6 +396,24 @@ fn update_help_disambiguates_the_three_verbs() {
     .success()
     .stdout(contains("anesis upgrade"))
     .stdout(contains("anesis addon republish"));
+}
+
+#[test]
+fn update_without_an_addon_id_or_all_is_an_error() {
+  cmd()
+    .args(["update"])
+    .assert()
+    .failure()
+    .stderr(contains("--all"));
+}
+
+#[test]
+fn update_with_both_an_addon_id_and_all_is_an_error() {
+  cmd()
+    .args(["update", "some-addon", "--all"])
+    .assert()
+    .failure()
+    .stderr(contains("both"));
 }
 
 #[test]

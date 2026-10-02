@@ -70,10 +70,17 @@ impl Cli {
   "name": "react-vite-ts",
   "version": "0.2.0",
   "anesisVersion": ">=1.0.0",
+  "author": { "name": "Anesis", "github": "anesis-dev" },
   "repository": { "url": "https://github.com/anesis-dev/templates" },
+  "specialization": "frontend",
+  "scope": "web",
+  "technologies": ["react", "vite"],
+  "languages": ["typescript"],
+  "type": "base",
   "metadata": {
     "displayName": "React + Vite (TypeScript)",
-    "description": "A React SPA scaffolded with Vite."
+    "description": "A React SPA scaffolded with Vite.",
+    "tags": ["react", "vite", "spa"]
   },
   "inputs": [
     {
@@ -163,12 +170,16 @@ fn info_json_shape() {
 }
 
 #[test]
-fn doctor_alias_matches_info() {
+fn doctor_json_reports_a_list_of_checks() {
   let cli = Cli::new();
-  assert_eq!(
-    cli.json(&["doctor", "--json"]),
-    cli.json(&["info", "--json"])
-  );
+  let value = cli.json(&["doctor", "--json"]);
+  let checks = value["checks"].as_array().expect("checks array");
+  assert!(!checks.is_empty());
+  for check in checks {
+    assert!(check["name"].is_string());
+    assert!(check["status"].is_string());
+    assert!(check["detail"].is_string());
+  }
 }
 
 #[test]

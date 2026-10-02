@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::{
   collections::HashMap,
   fs,
@@ -6,7 +7,6 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
-use colored::Colorize;
 use inquire::{Confirm, Select, Text};
 
 use crate::{
@@ -15,7 +15,7 @@ use crate::{
   templates::generator::{to_camel_case, to_kebab_case, to_pascal_case, to_snake_case},
   utils::{
     picker::{ItemKind, PickItem, pick_one},
-    ui::spinner,
+    ui::{self, spinner},
   },
 };
 
@@ -26,11 +26,38 @@ use super::{
   manifest::{AddonCommand, InputDef, InputType},
   steps::{
     Rollback, append::execute_append, copy::execute_copy, create::execute_create,
-    delete::execute_delete, inject::execute_inject, move_step::execute_move,
-    packages::execute_packages, rename::execute_rename, replace::execute_replace, run::execute_run,
+    delete::execute_delete, inject::execute_inject, json_patch::execute_json_patch,
+    move_step::execute_move, packages::execute_packages, rename::execute_rename,
+    replace::execute_replace, run::execute_run,
   },
 };
-use crate::addons::manifest::Step;
+use crate::addons::manifest::{Step, StepEntry};
+
+fn eval_step_when(expr: &str, inputs: &HashMap<String, String>) -> Result<bool> {
+  let expr = expr.trim();
+  let (negate, name) = match expr.strip_prefix('!') {
+    Some(rest) => (true, rest.trim()),
+    None => (false, expr),
+  };
+  let value = inputs
+    .get(name)
+    .ok_or_else(|| anyhow!("step 'when' references unknown input '{name}'"))?;
+  Ok((value == "true") ^ negate)
+}
+
+fn effective_steps(steps: &[StepEntry], inputs: &HashMap<String, String>) -> Result<Vec<Step>> {
+  let mut out = Vec::with_capacity(steps.len());
+  for entry in steps {
+    let include = match &entry.when {
+      Some(expr) => eval_step_when(expr, inputs)?,
+      None => true,
+    };
+    if include {
+      out.push(entry.kind.clone());
+    }
+  }
+  Ok(out)
+}
 
 fn take_journal(journal: &Mutex<Vec<Rollback>>) -> Vec<Rollback> {
   std::mem::take(&mut *journal.lock().unwrap_or_else(|e| e.into_inner()))
@@ -55,7 +82,7 @@ pub async fn run_addon_command(
   dry_run: bool,
 ) -> Result<()> {
   let non_interactive = non_interactive || dry_run;
-  let addon_dir = ctx.paths.addons.join(addon_id);
+  let addon_dir = ctx.paths.addon_dir(addon_id)?;
   let cached = super::cache::get_cached_addon(&ctx.paths.addons, addon_id)?;
 
   let (manifest, update_check) = if let Some(cached) = cached.filter(|_| addon_dir.exists()) {
@@ -150,7 +177,7 @@ pub async fn run_addon_command(
     }
   }
 
-  let mut tera_ctx = tera::Context::new();
+  let mut template_ctx = TemplateContext::new();
 
   let mut input_values: HashMap<String, String> = HashMap::new();
   collect_inputs(
@@ -159,7 +186,7 @@ pub async fn run_addon_command(
     non_interactive,
     &mut input_values,
   )?;
-  insert_with_derived(&mut tera_ctx, &input_values);
+  insert_with_derived(&mut template_ctx, &input_values);
 
   let mut cmd_input_values: HashMap<String, String> = HashMap::new();
   collect_inputs(
@@ -168,7 +195,14 @@ pub async fn run_addon_command(
     non_interactive,
     &mut cmd_input_values,
   )?;
-  insert_with_derived(&mut tera_ctx, &cmd_input_values);
+  insert_with_derived(&mut template_ctx, &cmd_input_values);
+
+  let combined_inputs: HashMap<String, String> = input_values
+    .iter()
+    .chain(cmd_input_values.iter())
+    .map(|(k, v)| (k.clone(), v.clone()))
+    .collect();
+  let steps = effective_steps(&command.steps, &combined_inputs)?;
 
   if dry_run {
     print_dry_run_plan(
@@ -177,18 +211,17 @@ pub async fn run_addon_command(
       detected_id.as_deref(),
       &input_values,
       &cmd_input_values,
-      &command.steps,
+      &steps,
     );
     return Ok(());
   }
 
-  if !confirm_addon_execution(addon_id, command_name, &command.steps, non_interactive)? {
-    println!("Aborted. No changes were made.");
-    return Ok(());
+  if !confirm_addon_execution(addon_id, command_name, &steps, non_interactive)? {
+    return Err(crate::utils::errors::AnesisError::Aborted.into());
   }
 
-  let addon_dir = ctx.paths.addons.join(addon_id);
-  let total = command.steps.len();
+  let addon_dir = ctx.paths.addon_dir(addon_id)?;
+  let total = steps.len();
 
   let journal: Arc<Mutex<Vec<Rollback>>> = Arc::new(Mutex::new(Vec::new()));
   {
@@ -201,31 +234,50 @@ pub async fn run_addon_command(
   }
   let _cleanup_guard = ClearCleanupOnDrop(&ctx.cleanup_state);
 
-  for (idx, step) in command.steps.iter().enumerate() {
+  let step_progress = ui::StepProgress::new();
+  for (idx, step) in steps.iter().enumerate() {
     let label = step_label(step);
-    println!("{} {}", format!("[{}/{}]", idx + 1, total).dimmed(), label);
+    let handle = step_progress.start_step(idx, total, &label);
 
     let result = match step {
-      Step::Copy(s) => execute_copy(s, &addon_dir, project_root, &tera_ctx, non_interactive),
-      Step::Create(s) => execute_create(s, project_root, &tera_ctx, non_interactive),
-      Step::Inject(s) => execute_inject(s, project_root, &tera_ctx),
-      Step::Replace(s) => execute_replace(s, project_root, &tera_ctx),
-      Step::Append(s) => execute_append(s, project_root, &tera_ctx),
-      Step::Delete(s) => execute_delete(s, project_root, &tera_ctx),
-      Step::Rename(s) => execute_rename(s, project_root, &tera_ctx),
-      Step::Move(s) => execute_move(s, project_root, &tera_ctx),
-      Step::Packages(s) => execute_packages(s, project_root),
-      Step::Run(s) => execute_run(s, project_root, &tera_ctx, non_interactive, ctx.allow_run),
-    }
-    .with_context(|| format!("step {} ({}) failed", idx + 1, label));
+      Step::Copy(s) => execute_copy(s, &addon_dir, project_root, &template_ctx, non_interactive),
+      Step::Create(s) => execute_create(s, project_root, &template_ctx, non_interactive),
+      Step::Inject(s) => execute_inject(s, project_root, &template_ctx, non_interactive),
+      Step::Replace(s) => execute_replace(s, project_root, &template_ctx, non_interactive),
+      Step::Append(s) => execute_append(s, project_root, &template_ctx),
+      Step::Delete(s) => execute_delete(s, project_root, &template_ctx),
+      Step::Rename(s) => execute_rename(s, project_root, &template_ctx),
+      Step::Move(s) => execute_move(s, project_root, &template_ctx),
+      Step::Packages(s) => execute_packages(s, project_root, non_interactive, ctx.allow_run),
+      Step::Run(s) => execute_run(
+        s,
+        project_root,
+        &template_ctx,
+        non_interactive,
+        ctx.allow_run,
+      ),
+      Step::JsonPatch(s) => execute_json_patch(s, project_root, &template_ctx),
+    };
 
     match result {
-      Ok(rollbacks) => journal
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .extend(rollbacks),
-      Err(err) => {
-        eprintln!("{} {:#}", "✗".red().bold(), err);
+      Ok(rollbacks) => {
+        handle.success();
+        journal
+          .lock()
+          .unwrap_or_else(|e| e.into_inner())
+          .extend(rollbacks);
+      }
+      Err(failure) => {
+        handle.failure();
+        journal
+          .lock()
+          .unwrap_or_else(|e| e.into_inner())
+          .extend(failure.rollbacks);
+
+        let err = failure
+          .error
+          .context(format!("step {} ({}) failed", idx + 1, label));
+        ui::failure(format!("{err:#}"));
         let choice = if non_interactive {
           "Rollback all changes"
         } else {
@@ -248,44 +300,56 @@ pub async fn run_addon_command(
     }
   }
 
-  let completed_rollbacks = take_journal(&journal);
-  {
-    let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
-    *guard = None;
-  }
+  let completed_rollbacks = journal.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
   let variant_id = detected_id.unwrap_or_else(|| "universal".to_string());
   if let Some(existing) = lock.addons.iter_mut().find(|e| e.id == addon_id) {
     existing.version = manifest.version.clone();
     existing.variant = variant_id;
-    existing.journal.extend(completed_rollbacks);
-    existing.inputs.extend(
-      input_values
-        .iter()
-        .chain(&cmd_input_values)
-        .map(|(k, v)| (k.clone(), v.clone())),
+    existing.inputs = input_values.clone();
+    existing.upsert_command(
+      command_name,
+      cmd_input_values.clone(),
+      completed_rollbacks.clone(),
     );
   } else {
-    let mut inputs = input_values.clone();
-    inputs.extend(cmd_input_values.iter().map(|(k, v)| (k.clone(), v.clone())));
-    lock.addons.push(LockEntry {
-      id: addon_id.to_string(),
-      version: manifest.version.clone(),
-      variant: variant_id,
-      commands_executed: Vec::new(),
-      journal: completed_rollbacks,
-      inputs,
-    });
+    let mut entry = LockEntry::new(addon_id, manifest.version.clone(), variant_id);
+    entry.inputs = input_values.clone();
+    entry.upsert_command(
+      command_name,
+      cmd_input_values.clone(),
+      completed_rollbacks.clone(),
+    );
+    lock.addons.push(entry);
   }
-  lock.mark_command_executed(addon_id, command_name);
-  lock.save(project_root)?;
+
+  if let Err(err) = lock.save(project_root) {
+    ui::failure(format!(
+      "Failed to save the rollback journal ({err:#}); rolling back this command's changes."
+    ));
+    for rollback in take_journal(&journal).into_iter().rev() {
+      let _ = apply_rollback(rollback, project_root);
+    }
+    println!("Rolled back all changes made by this command.");
+    return Err(err.context("Failed to save anesis.lock"));
+  }
+
+  take_journal(&journal);
+  {
+    let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = None;
+  }
 
   record_addon_use(ctx, addon_id).await;
 
   if let Err(err) = AnesisManifest::add_addon(addon_id, project_root) {
     eprintln!("Note: could not update anesis.json ({err}).");
   }
-  println!("✓ Command '{}' completed successfully.", command_name);
+  ui::success(format!("Command '{command_name}' completed successfully."));
+  let summary = super::summary::ChangeSummary::from_rollbacks(&completed_rollbacks);
+  if !summary.is_empty() {
+    println!("{}", summary.render_block(&completed_rollbacks));
+  }
 
   if let Some(handle) = update_check
     && matches!(handle.await, Ok(Some(_)))
@@ -316,7 +380,7 @@ pub async fn list_addon_commands(
   non_interactive: bool,
   dry_run: bool,
 ) -> Result<()> {
-  let addon_dir = ctx.paths.addons.join(addon_id);
+  let addon_dir = ctx.paths.addon_dir(addon_id)?;
   let cached = super::cache::get_cached_addon(&ctx.paths.addons, addon_id)?;
   let manifest = if cached.is_some() && addon_dir.exists() {
     read_cached_manifest(&ctx.paths.addons, addon_id)?
@@ -337,7 +401,7 @@ pub async fn list_addon_commands(
     .or_else(|| manifest.variants.iter().find(|v| v.when.is_none()));
   let commands: Vec<&AddonCommand> = match matched {
     Some(variant) => variant.commands.iter().collect(),
-    None => manifest.variants.iter().flat_map(|v| &v.commands).collect(),
+    None => Vec::new(),
   };
 
   if commands.is_empty() {
@@ -381,15 +445,16 @@ pub async fn list_addon_commands(
   }
 }
 
-fn step_label(step: &Step) -> String {
+pub(crate) fn step_label(step: &Step) -> String {
   use crate::addons::manifest::Target;
+  use crate::utils::sanitize::sanitize_for_display;
   fn target(t: &Target) -> &str {
     match t {
       Target::File { file } => file,
       Target::Glob { glob } => glob,
     }
   }
-  match step {
+  let raw = match step {
     Step::Copy(s) => format!("copy '{}' → '{}'", s.src, s.dest),
     Step::Create(s) => format!("create '{}'", s.path),
     Step::Inject(s) => format!("inject into '{}'", target(&s.target)),
@@ -403,6 +468,51 @@ fn step_label(step: &Step) -> String {
       s.dependencies.len() + s.dev_dependencies.len()
     ),
     Step::Run(s) => format!("run '{}'", s.command),
+    Step::JsonPatch(s) => format!("patch JSON in '{}'", s.path),
+  };
+  sanitize_for_display(&raw)
+}
+
+#[doc(hidden)]
+pub fn step_label_for_tests(step: &Step) -> String {
+  step_label(step)
+}
+
+pub struct StepPlan {
+  pub label: String,
+  pub requires_allow_run: bool,
+}
+
+pub struct CommandPlan {
+  pub addon_id: String,
+  pub command_name: String,
+  pub variant: Option<String>,
+  pub steps: Vec<StepPlan>,
+}
+
+impl CommandPlan {
+  pub fn needs_allow_run(&self) -> bool {
+    self.steps.iter().any(|s| s.requires_allow_run)
+  }
+}
+
+pub fn plan_command(
+  addon_id: &str,
+  command_name: &str,
+  variant: Option<&str>,
+  steps: &[Step],
+) -> CommandPlan {
+  CommandPlan {
+    addon_id: addon_id.to_string(),
+    command_name: command_name.to_string(),
+    variant: variant.map(str::to_string),
+    steps: steps
+      .iter()
+      .map(|step| StepPlan {
+        label: step_label(step),
+        requires_allow_run: matches!(step, Step::Run(_) | Step::Packages(_)),
+      })
+      .collect(),
   }
 }
 
@@ -414,36 +524,30 @@ fn print_dry_run_plan(
   cmd_inputs: &HashMap<String, String>,
   steps: &[Step],
 ) {
-  println!(
-    "{} {} {}",
-    "Dry run:".bold(),
-    addon_id.cyan(),
-    command_name.cyan()
-  );
-  println!(
-    "  {} {}",
-    "variant:".dimmed(),
-    variant.unwrap_or("universal")
-  );
+  let plan = plan_command(addon_id, command_name, variant, steps);
+
+  ui::section(format!(
+    "Dry run: {} {}",
+    ui::accent(&plan.addon_id),
+    ui::accent(&plan.command_name)
+  ));
+  ui::kv("  variant", plan.variant.as_deref().unwrap_or("universal"));
 
   let mut inputs: Vec<(&String, &String)> = addon_inputs.iter().chain(cmd_inputs.iter()).collect();
   inputs.sort_by(|a, b| a.0.cmp(b.0));
   if inputs.is_empty() {
-    println!("  {} (none)", "inputs:".dimmed());
+    ui::kv("  inputs", "(none)");
   } else {
-    println!("  {}", "inputs:".dimmed());
+    println!("  inputs:");
     for (k, v) in inputs {
       println!("    {k} = {v}");
     }
   }
 
-  println!("  {} {} step(s)", "steps:".dimmed(), steps.len());
-  for (idx, step) in steps.iter().enumerate() {
-    println!(
-      "    {} {}",
-      format!("[{}/{}]", idx + 1, steps.len()).dimmed(),
-      step_label(step)
-    );
+  ui::kv("  steps", format!("{} step(s)", plan.steps.len()));
+  for (idx, step) in plan.steps.iter().enumerate() {
+    print!("    ");
+    ui::step(idx, plan.steps.len(), &step.label);
   }
   println!("\nNo files were changed.");
 }
@@ -461,17 +565,20 @@ fn confirm_addon_execution(
   for step in steps {
     match step {
       Step::Create(_) | Step::Copy(_) => writes += 1,
-      Step::Inject(_) | Step::Replace(_) | Step::Append(_) | Step::Packages(_) | Step::Run(_) => {
-        edits += 1
-      }
+      Step::Inject(_)
+      | Step::Replace(_)
+      | Step::Append(_)
+      | Step::Packages(_)
+      | Step::Run(_)
+      | Step::JsonPatch(_) => edits += 1,
       Step::Delete(_) | Step::Rename(_) | Step::Move(_) => removes += 1,
     }
   }
 
-  println!(
-    "⚠ Addon '{addon_id}' command '{command_name}' will modify files in this project \
+  ui::warn(format!(
+    "Addon '{addon_id}' command '{command_name}' will modify files in this project \
      ({writes} created/copied, {edits} edited, {removes} deleted/moved)."
-  );
+  ));
   println!(
     "  Addons run unsandboxed and can overwrite source files or 'package.json'. \
      Only run addons you trust."
@@ -572,7 +679,7 @@ pub fn collect_inputs(
   Ok(())
 }
 
-fn insert_with_derived(ctx: &mut tera::Context, map: &HashMap<String, String>) {
+fn insert_with_derived(ctx: &mut TemplateContext, map: &HashMap<String, String>) {
   for (k, v) in map {
     ctx.insert(k.as_str(), v);
     ctx.insert(format!("{k}_pascal"), &to_pascal_case(v));
@@ -583,13 +690,25 @@ fn insert_with_derived(ctx: &mut tera::Context, map: &HashMap<String, String>) {
 }
 
 fn prune_empty_dirs(start: Option<&Path>, project_root: &Path) {
+  let canonical_root = project_root
+    .canonicalize()
+    .unwrap_or_else(|_| project_root.to_path_buf());
   let mut dir = start;
   while let Some(d) = dir {
-    if d == project_root || fs::remove_dir(d).is_err() {
+    let canonical_d = d.canonicalize().unwrap_or_else(|_| d.to_path_buf());
+    if canonical_d == canonical_root
+      || !canonical_d.starts_with(&canonical_root)
+      || fs::remove_dir(d).is_err()
+    {
       break;
     }
     dir = d.parent();
   }
+}
+
+#[doc(hidden)]
+pub fn prune_empty_dirs_for_tests(start: Option<&Path>, project_root: &Path) {
+  prune_empty_dirs(start, project_root);
 }
 
 pub fn undo_addon(addon_id: &str, project_root: &Path, non_interactive: bool) -> Result<()> {
@@ -598,32 +717,24 @@ pub fn undo_addon(addon_id: &str, project_root: &Path, non_interactive: bool) ->
     .addons
     .iter()
     .find(|e| e.id == addon_id)
-    .filter(|e| !e.journal.is_empty())
+    .filter(|e| e.has_undoable_changes())
     .ok_or_else(|| {
       anyhow!("Addon '{addon_id}' has no undoable changes recorded in this project.")
     })?;
 
-  let mut conflicts: Vec<String> = Vec::new();
-  for rollback in &entry.journal {
-    match rollback {
-      Rollback::DeleteCreatedFile { path } if !path.exists() => {
-        conflicts.push(format!("{} (already deleted)", path.display()));
-      }
-      Rollback::RestoreFile { path, .. } if !path.exists() => {
-        conflicts.push(format!("{} (missing)", path.display()));
-      }
-      Rollback::RenameFile { to, .. } if !to.exists() => {
-        conflicts.push(format!("{} (missing)", to.display()));
-      }
-      _ => {}
-    }
-  }
+  let tagged: Vec<(usize, Rollback)> = entry
+    .commands
+    .iter()
+    .enumerate()
+    .flat_map(|(ci, cmd)| cmd.journal.iter().map(move |rb| (ci, rb.clone())))
+    .collect();
+
+  let conflicts = undo_conflicts(&tagged);
 
   if !conflicts.is_empty() {
-    eprintln!(
-      "{} some files changed since '{addon_id}' was applied:",
-      "⚠".yellow().bold()
-    );
+    ui::warn_err(format!(
+      "some files changed since '{addon_id}' was applied:"
+    ));
     for c in &conflicts {
       eprintln!("  {c}");
     }
@@ -634,14 +745,41 @@ pub fn undo_addon(addon_id: &str, project_root: &Path, non_interactive: bool) ->
       .with_default(conflicts.is_empty())
       .prompt()?
   {
-    println!("Aborted. No changes were made.");
-    return Ok(());
+    return Err(crate::utils::errors::AnesisError::Aborted.into());
   }
 
-  let entry = lock.addons.iter_mut().find(|e| e.id == addon_id).unwrap();
-  let journal = std::mem::take(&mut entry.journal);
-  for rollback in journal.into_iter().rev() {
-    apply_rollback(rollback, project_root)?;
+  let mut remaining: Vec<(usize, Rollback)> = Vec::new();
+  let mut failures = Vec::new();
+  let mut applied: Vec<Rollback> = Vec::new();
+  for (ci, rollback) in tagged.into_iter().rev() {
+    let description = describe_rollback(&rollback);
+    if let Err(err) = apply_rollback(rollback.clone(), project_root) {
+      failures.push(format!("{description}: {err:#}"));
+      remaining.push((ci, rollback));
+    } else {
+      applied.push(rollback);
+    }
+  }
+
+  if !failures.is_empty() {
+    remaining.reverse();
+    let entry = lock.addons.iter_mut().find(|e| e.id == addon_id).unwrap();
+    for cmd in &mut entry.commands {
+      cmd.journal.clear();
+    }
+    for (ci, rollback) in remaining {
+      entry.commands[ci].journal.push(rollback);
+    }
+    lock.save(project_root)?;
+
+    ui::warn_err(format!("could not undo every change made by '{addon_id}':"));
+    for f in &failures {
+      eprintln!("  {f}");
+    }
+    return Err(anyhow!(
+      "Addon '{addon_id}' was partially reverted; {} change(s) remain — fix the issue above and re-run `anesis undo {addon_id}`.",
+      failures.len()
+    ));
   }
 
   lock.remove_addon(addon_id);
@@ -651,11 +789,18 @@ pub fn undo_addon(addon_id: &str, project_root: &Path, non_interactive: bool) ->
     eprintln!("Note: could not update anesis.json ({err}).");
   }
 
-  println!("✓ Reverted addon '{addon_id}'.");
+  ui::success(format!("Reverted addon '{addon_id}'."));
+  let summary = super::summary::ChangeSummary::from_rollbacks(&applied);
+  if !summary.is_empty() {
+    println!("{}", summary.render_block(&applied));
+  }
   Ok(())
 }
 
 fn is_newer(latest: &str, current: &str) -> bool {
+  if latest.trim().is_empty() {
+    return false;
+  }
   match (
     semver::Version::parse(latest),
     semver::Version::parse(current),
@@ -680,17 +825,8 @@ pub struct OutdatedEntry {
   pub error: Option<String>,
 }
 
-pub async fn outdated(ctx: &AppContext, project_root: &Path, json: bool) -> Result<()> {
+pub async fn collect_outdated(ctx: &AppContext, project_root: &Path) -> Result<Vec<OutdatedEntry>> {
   let lock = LockFile::load(project_root)?;
-
-  if lock.addons.is_empty() {
-    if json {
-      println!("[]");
-    } else {
-      println!("No addons applied in this project.");
-    }
-    return Ok(());
-  }
 
   let mut entries = Vec::with_capacity(lock.addons.len());
   for entry in &lock.addons {
@@ -711,6 +847,22 @@ pub async fn outdated(ctx: &AppContext, project_root: &Path, json: bool) -> Resu
       },
     });
   }
+  Ok(entries)
+}
+
+pub async fn outdated(ctx: &AppContext, project_root: &Path, json: bool) -> Result<()> {
+  let lock = LockFile::load(project_root)?;
+
+  if lock.addons.is_empty() {
+    if json {
+      println!("[]");
+    } else {
+      println!("No addons applied in this project.");
+    }
+    return Ok(());
+  }
+
+  let entries = collect_outdated(ctx, project_root).await?;
 
   if json {
     println!("{}", serde_json::to_string_pretty(&entries)?);
@@ -723,13 +875,14 @@ pub async fn outdated(ctx: &AppContext, project_root: &Path, json: bool) -> Resu
       (Some(latest), _) if entry.outdated => {
         any = true;
         println!(
-          "  {} v{} → v{}",
-          entry.id.cyan(),
+          "  {} v{} {} v{}",
+          ui::accent(&entry.id),
           entry.current,
-          latest.green()
+          ui::symbols::arrow(),
+          ui::good(latest)
         );
       }
-      (_, Some(err)) => eprintln!("  {} (could not check: {err})", entry.id.dimmed()),
+      (_, Some(err)) => eprintln!("  {} (could not check: {err})", ui::muted(&entry.id)),
       _ => {}
     }
   }
@@ -748,7 +901,7 @@ pub async fn update_addon(
   project_root: &Path,
   non_interactive: bool,
 ) -> Result<()> {
-  let (current, commands, saved_inputs, had_journal) = {
+  let (current, entry_inputs, command_runs, had_journal) = {
     let lock = LockFile::load(project_root)?;
     let entry = lock
       .addons
@@ -757,9 +910,13 @@ pub async fn update_addon(
       .ok_or_else(|| anyhow!("Addon '{addon_id}' is not applied in this project."))?;
     (
       entry.version.clone(),
-      entry.commands_executed.clone(),
       entry.inputs.clone(),
-      !entry.journal.is_empty(),
+      entry
+        .commands
+        .iter()
+        .map(|c| (c.name.clone(), c.inputs.clone()))
+        .collect::<Vec<_>>(),
+      entry.has_undoable_changes(),
     )
   };
 
@@ -771,6 +928,27 @@ pub async fn update_addon(
 
   println!("Updating '{addon_id}' v{current} → v{latest}...");
 
+  install_addon(ctx, addon_id).await.with_context(|| {
+    format!(
+      "Failed to fetch addon '{addon_id}' v{latest}; the currently-applied v{current} is unaffected"
+    )
+  })?;
+
+  let new_manifest = read_cached_manifest(&ctx.paths.addons, addon_id)?;
+  preflight_update(
+    &new_manifest,
+    project_root,
+    &entry_inputs,
+    &command_runs,
+    ctx.allow_run,
+  )
+  .with_context(|| {
+    format!(
+      "addon '{addon_id}' v{latest} cannot be safely re-applied to this project; \
+       the currently-applied v{current} is unaffected and nothing was undone"
+    )
+  })?;
+
   if had_journal {
     undo_addon(addon_id, project_root, true)?;
   } else {
@@ -779,23 +957,146 @@ pub async fn update_addon(
     lock.save(project_root)?;
     let _ = AnesisManifest::remove_addon(addon_id, project_root);
   }
-  install_addon(ctx, addon_id).await?;
 
-  for cmd in &commands {
+  for (cmd, inputs) in &command_runs {
     run_addon_command(
       ctx,
       addon_id,
       cmd,
       project_root,
-      &saved_inputs,
+      inputs,
       non_interactive,
       false,
     )
-    .await?;
+    .await
+    .with_context(|| {
+      format!(
+        "addon '{addon_id}' was updated to v{latest} and its old files were reverted, but \
+         re-applying command '{cmd}' failed; commands before it in this list were re-applied \
+         successfully — fix the issue above, then run `anesis use {addon_id} <command>` for \
+         any that still need it"
+      )
+    })?;
   }
 
-  println!("✓ Updated '{addon_id}' to v{latest}.");
+  ui::success(format!("Updated '{addon_id}' to v{latest}."));
   Ok(())
+}
+
+fn preflight_update(
+  manifest: &super::manifest::AddonManifest,
+  project_root: &Path,
+  entry_inputs: &HashMap<String, String>,
+  command_runs: &[(String, HashMap<String, String>)],
+  allow_run: bool,
+) -> Result<()> {
+  let detected_id = detect_variant(&manifest.detect, project_root);
+
+  for (command_name, cmd_inputs) in command_runs {
+    let variant = manifest
+      .variants
+      .iter()
+      .find(|v| v.when.as_deref() == detected_id.as_deref())
+      .or_else(|| manifest.variants.iter().find(|v| v.when.is_none()))
+      .ok_or_else(|| anyhow!("no variant of the new version matches this project anymore"))?;
+
+    let command = variant
+      .commands
+      .iter()
+      .find(|c| &c.name == command_name)
+      .ok_or_else(|| anyhow!("command '{command_name}' no longer exists in the new version"))?;
+
+    for req_cmd in &command.requires_commands {
+      if !command_runs.iter().any(|(name, _)| name == req_cmd) {
+        return Err(anyhow!(
+          "command '{command_name}' now requires '{req_cmd}' to run first, which was not \
+           previously applied to this project"
+        ));
+      }
+    }
+
+    for input in manifest.inputs.iter().chain(command.inputs.iter()) {
+      if input.required
+        && input.default.is_none()
+        && !entry_inputs.contains_key(&input.name)
+        && !cmd_inputs.contains_key(&input.name)
+      {
+        return Err(anyhow!(
+          "command '{command_name}' now requires input '{}', which was not saved for this project",
+          input.name
+        ));
+      }
+    }
+
+    let combined_inputs: HashMap<String, String> = entry_inputs
+      .iter()
+      .chain(cmd_inputs.iter())
+      .map(|(k, v)| (k.clone(), v.clone()))
+      .collect();
+    let steps = effective_steps(&command.steps, &combined_inputs)?;
+    let plan = plan_command(&manifest.id, command_name, detected_id.as_deref(), &steps);
+    if plan.needs_allow_run() && !allow_run {
+      return Err(anyhow!(
+        "command '{command_name}' now runs a shell/packages step, which requires --allow-run"
+      ));
+    }
+  }
+
+  Ok(())
+}
+
+fn undo_conflicts(tagged: &[(usize, Rollback)]) -> Vec<String> {
+  let mut conflicts: Vec<String> = Vec::new();
+  for (_, rollback) in tagged {
+    match rollback {
+      Rollback::DeleteCreatedFile { path } if !path.exists() => {
+        conflicts.push(format!("{} (already deleted)", path.display()));
+      }
+      Rollback::RestoreFile { path, .. } if !path.exists() => {
+        conflicts.push(format!("{} (missing)", path.display()));
+      }
+      Rollback::RenameFile { from, .. } if !from.exists() => {
+        conflicts.push(format!("{} (missing)", from.display()));
+      }
+      _ => {}
+    }
+  }
+  conflicts
+}
+
+#[doc(hidden)]
+pub fn undo_conflicts_for_tests(tagged: &[(usize, Rollback)]) -> Vec<String> {
+  undo_conflicts(tagged)
+}
+
+fn describe_rollback(rollback: &Rollback) -> String {
+  match rollback {
+    Rollback::DeleteCreatedFile { path } => format!("delete {}", path.display()),
+    Rollback::RestoreFile { path, .. } => format!("restore {}", path.display()),
+    Rollback::RenameFile { from, to } => {
+      format!("rename {} back to {}", to.display(), from.display())
+    }
+    Rollback::IrreversibleRun { command } => format!("(irreversible) {command}"),
+  }
+}
+
+#[cfg(unix)]
+fn restore_symlink(target: &Path, path: &Path) -> Result<()> {
+  std::os::unix::fs::symlink(target, path)?;
+  Ok(())
+}
+
+#[cfg(windows)]
+fn restore_symlink(target: &Path, path: &Path) -> Result<()> {
+  std::os::windows::fs::symlink_file(target, path)?;
+  Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn restore_symlink(_target: &Path, _path: &Path) -> Result<()> {
+  Err(anyhow!(
+    "restoring a symlink is not supported on this platform"
+  ))
 }
 
 pub fn apply_rollback(rollback: Rollback, project_root: &Path) -> Result<()> {
@@ -804,19 +1105,32 @@ pub fn apply_rollback(rollback: Rollback, project_root: &Path) -> Result<()> {
       let _ = std::fs::remove_file(&path);
       prune_empty_dirs(path.parent(), project_root);
     }
-    Rollback::RestoreFile { path, original } => {
-      std::fs::write(path, original)?;
+    Rollback::RestoreFile {
+      path,
+      original,
+      mode: _mode,
+      is_symlink,
+    } => {
+      if is_symlink {
+        let target = String::from_utf8_lossy(&original).into_owned();
+        restore_symlink(Path::new(&target), &path)?;
+      } else {
+        std::fs::write(&path, original)?;
+        #[cfg(unix)]
+        if let Some(mode) = _mode {
+          use std::os::unix::fs::PermissionsExt;
+          std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+        }
+      }
     }
     Rollback::RenameFile { from, to } => {
       std::fs::rename(&from, to)?;
       prune_empty_dirs(from.parent(), project_root);
     }
     Rollback::IrreversibleRun { command } => {
-      eprintln!(
-        "{} could not undo shell command '{}' — its effects remain.",
-        "⚠".yellow().bold(),
-        command
-      );
+      ui::warn_err(format!(
+        "could not undo shell command '{command}' — its effects remain."
+      ));
     }
   }
   Ok(())

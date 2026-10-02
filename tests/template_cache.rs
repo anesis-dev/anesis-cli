@@ -156,3 +156,24 @@ fn get_cached_template_returns_none_when_no_index() {
   let result = get_cached_template(&ctx, "react-vite").unwrap();
   assert!(result.is_none());
 }
+
+#[test]
+fn update_cache_rejects_manifest_name_mismatch() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  write_anesis_template_json(&dir, "requested-template", "impersonated-name");
+
+  let err = update_templates_cache(
+    dir.path(),
+    std::path::Path::new("requested-template"),
+    "sha1",
+  )
+  .expect_err("a manifest name that differs from the requested directory must be rejected");
+
+  assert!(err.to_string().contains("impersonated-name"));
+
+  let content = std::fs::read_to_string(dir.path().join("anesis-templates.json"));
+  if let Ok(content) = content {
+    let cache: TemplatesCache = serde_json::from_str(&content).unwrap();
+    assert!(cache.templates.is_empty());
+  }
+}

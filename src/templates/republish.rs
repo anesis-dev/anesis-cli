@@ -1,7 +1,14 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
-use crate::{auth::token::get_auth_user, context::AppContext, utils::ui::spinner};
+use crate::{
+  auth::token::get_auth_user,
+  context::AppContext,
+  utils::{
+    errors::check_response,
+    ui::{self, spinner},
+  },
+};
 
 #[derive(Deserialize, Serialize)]
 pub struct RepublishTemplateDto {
@@ -29,7 +36,7 @@ pub async fn republish(
   let user = get_auth_user(&ctx.paths.auth)?;
 
   let sp = spinner("Republishing template to registry...");
-  let res: RepublishTemplateResponse = ctx
+  let response = ctx
     .client
     .patch(format!("{}/template", ctx.backend_url))
     .bearer_auth(user.token)
@@ -42,14 +49,16 @@ pub async fn republish(
     })
     .send()
     .await
-    .inspect_err(|_| sp.finish_and_clear())?
-    .error_for_status()
-    .inspect_err(|_| sp.finish_and_clear())?
+    .inspect_err(|_| sp.finish_and_clear())?;
+  let response = check_response(response, "template")
+    .await
+    .inspect_err(|_| sp.finish_and_clear())?;
+  let res: RepublishTemplateResponse = response
     .json()
     .await
     .inspect_err(|_| sp.finish_and_clear())?;
   sp.finish_and_clear();
 
-  println!("✅ {}", res.message);
+  ui::success(&res.message);
   Ok(())
 }

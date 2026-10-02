@@ -33,14 +33,26 @@ export ANESIS_FRONTEND_URL=http://localhost:3000
 `ANESIS_DEBUG=1` swaps the friendly error messages for full error chains and
 panic backtraces.
 
+Enable the repository's git hooks once per clone — `core.hooksPath` is local
+config, so it does not come with the checkout:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+`.githooks/pre-push` then runs fmt, clippy and the test suite before every
+push. `git push --no-verify` or `ANESIS_SKIP_HOOKS=1` bypasses it.
+
 ## Before opening a PR
 
-All four must pass. CI runs the same commands on Linux, macOS and Windows.
+All four must pass. CI runs the same commands on Linux, macOS and Windows,
+using `cargo nextest run` — use it locally too so mutation-testing baselines
+stay meaningful.
 
 ```bash
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
-cargo nextest run           # or `cargo test`
+cargo nextest run
 cargo publish --dry-run --locked
 ```
 
@@ -87,3 +99,19 @@ the CLI surface, note whether `CHANGELOG.md` needs an entry.
 Releases are cut by tagging `vX.Y.Z`. That triggers `release.yml`, which builds
 for five targets, generates `SHA256SUMS`, publishes the GitHub release, and then
 pushes to crates.io and npm. `smoke.yml` also runs on the tag.
+
+## Manual install-script checklist
+
+`install.sh`, `install.ps1`, and `npm/install.js` have no automated test
+harness — verify these by hand before a release that touches them:
+
+- `npm/install.js` behind a proxy: set `HTTPS_PROXY` (or `HTTP_PROXY`,
+  `npm_config_https_proxy`) to a local proxy (e.g. `mitmproxy`) and confirm the
+  binary still downloads through it.
+- To skip the binary download entirely (e.g. to drop in a locally-built
+  binary), set `ANESIS_SKIP_INSTALL=1` before `npm install`, then place the
+  binary at `npm/bin/anesis` (`npm/bin/anesis.exe` on Windows) yourself.
+- `install.ps1` PATH handling: run it twice in a row on a clean Windows user
+  profile and confirm the second run reports "already in your PATH" instead
+  of appending a duplicate entry, and that an existing `REG_EXPAND_SZ` `Path`
+  (e.g. containing `%JAVA_HOME%\bin`) is not collapsed to a literal path.

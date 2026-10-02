@@ -1,7 +1,14 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::{auth::token::get_auth_user, context::AppContext, utils::ui::spinner};
+use crate::{
+  auth::token::get_auth_user,
+  context::AppContext,
+  utils::{
+    errors::check_response,
+    ui::{self, spinner},
+  },
+};
 
 #[derive(Serialize)]
 struct PublishStackDto {
@@ -38,7 +45,7 @@ pub async fn publish_stack(
   };
 
   let sp = spinner(format!("{verb} stack to registry..."));
-  let res = method
+  let response = method
     .bearer_auth(user.token)
     .header("Content-Type", "application/json")
     .json(&PublishStackDto {
@@ -49,8 +56,9 @@ pub async fn publish_stack(
     })
     .send()
     .await
-    .inspect_err(|_| sp.finish_and_clear())?
-    .error_for_status()
+    .inspect_err(|_| sp.finish_and_clear())?;
+  let res = check_response(response, "stack")
+    .await
     .inspect_err(|_| sp.finish_and_clear())?;
   sp.finish_and_clear();
 
@@ -59,7 +67,7 @@ pub async fn publish_stack(
     .get("message")
     .and_then(|m| m.as_str())
     .unwrap_or("Done");
-  println!("✅ {message}");
+  ui::success(message);
   if let Some(id) = body.get("stack_id").and_then(|m| m.as_str()) {
     println!("   Stack: {id}");
   }

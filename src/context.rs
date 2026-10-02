@@ -17,6 +17,9 @@ pub enum CleanupTask {
   PartialProject {
     path: PathBuf,
   },
+  PartialProjectFiles {
+    paths: Vec<PathBuf>,
+  },
   PartialAddon {
     addon_id: String,
     project_root: PathBuf,
@@ -48,10 +51,10 @@ fn env_flag(name: &str) -> bool {
 
 impl AppContext {
   pub fn new(paths: AnesisPaths, client: Client, cleanup_state: CleanupState) -> Self {
-    let backend_url = std::env::var("ANESIS_BACKEND_URL")
-      .unwrap_or_else(|_| "https://anesis-server.onrender.com".to_string());
-    let frontend_url = std::env::var("ANESIS_FRONTEND_URL")
-      .unwrap_or_else(|_| "https://anesis-dev.vercel.app".to_string());
+    let backend_url =
+      std::env::var("ANESIS_BACKEND_URL").unwrap_or_else(|_| "https://api.anesis.tech".to_string());
+    let frontend_url =
+      std::env::var("ANESIS_FRONTEND_URL").unwrap_or_else(|_| "https://anesis.tech".to_string());
     Self {
       paths,
       client,

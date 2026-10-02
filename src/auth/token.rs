@@ -12,7 +12,11 @@ struct ExpClaim {
 }
 
 pub fn get_auth_user(auth_path: &Path) -> Result<User> {
-  if let Ok(token) = std::env::var("ANESIS_TOKEN") {
+  resolve_auth_user(auth_path, std::env::var("ANESIS_TOKEN").ok().as_deref())
+}
+
+fn resolve_auth_user(auth_path: &Path, token_override: Option<&str>) -> Result<User> {
+  if let Some(token) = token_override {
     let token = token.trim();
     if !token.is_empty() {
       return Ok(User {
@@ -30,6 +34,14 @@ pub fn get_auth_user(auth_path: &Path) -> Result<User> {
   }
 
   Ok(user)
+}
+
+#[doc(hidden)]
+pub fn get_auth_user_with_token_override_for_tests(
+  auth_path: &Path,
+  token_override: Option<&str>,
+) -> Result<User> {
+  resolve_auth_user(auth_path, token_override)
 }
 
 fn is_token_expired(token: &str) -> bool {

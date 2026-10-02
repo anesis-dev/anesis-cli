@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +54,19 @@ pub struct AddonManifest {
   pub detect: Vec<DetectBlock>,
   #[serde(default)]
   pub variants: Vec<Variant>,
+}
+
+pub fn parse(content: &str) -> Result<AddonManifest> {
+  let manifest: AddonManifest =
+    serde_json::from_str(content).context("Invalid anesis.addon.json structure")?;
+  validate(&manifest)?;
+  Ok(manifest)
+}
+
+pub fn validate(manifest: &AddonManifest) -> Result<()> {
+  crate::compat::check_schema_version("addon", &manifest.id, &manifest.schema_version)?;
+  crate::utils::validate::validate_registry_id("addon", &manifest.id)?;
+  Ok(())
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -149,10 +163,18 @@ pub struct AddonCommand {
   #[serde(default)]
   pub inputs: Vec<InputDef>,
   #[serde(default)]
-  pub steps: Vec<Step>,
+  pub steps: Vec<StepEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepEntry {
+  #[serde(flatten)]
+  pub kind: Step,
+  #[serde(default)]
+  pub when: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Step {
   Copy(CopyStep),
@@ -165,9 +187,10 @@ pub enum Step {
   Move(MoveStep),
   Packages(PackagesStep),
   Run(RunStep),
+  JsonPatch(JsonPatchStep),
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CopyStep {
   pub src: String,
   pub dest: String,
@@ -181,7 +204,7 @@ fn default_true() -> bool {
   true
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreateStep {
   pub path: String,
   pub content: String,
@@ -189,7 +212,7 @@ pub struct CreateStep {
   pub if_exists: IfExists,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InjectStep {
   pub target: Target,
   pub content: String,
@@ -199,7 +222,7 @@ pub struct InjectStep {
   pub if_not_found: IfNotFound,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReplaceStep {
   pub target: Target,
   pub find: String,
@@ -208,30 +231,30 @@ pub struct ReplaceStep {
   pub if_not_found: IfNotFound,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppendStep {
   pub target: Target,
   pub content: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeleteStep {
   pub target: Target,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RenameStep {
   pub from: String,
   pub to: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MoveStep {
   pub from: String,
   pub to: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PackagesStep {
   #[serde(default)]
   pub dependencies: Vec<String>,
@@ -239,21 +262,30 @@ pub struct PackagesStep {
   pub dev_dependencies: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunStep {
   pub command: String,
   #[serde(default)]
   pub description: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonPatchStep {
+  pub path: String,
+  #[serde(default)]
+  pub set: std::collections::HashMap<String, serde_json::Value>,
+  #[serde(default)]
+  pub remove: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Target {
   File { file: String },
   Glob { glob: String },
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IfExists {
   Ask,
@@ -262,7 +294,7 @@ pub enum IfExists {
   Skip,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum IfNotFound {
   #[default]

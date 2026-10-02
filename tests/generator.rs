@@ -5,17 +5,17 @@ use std::{
 };
 
 use anesis::{
-  context::AppContext,
+  context::{AppContext, CleanupTask},
   paths::AnesisPaths,
   templates::{
     ExcludeBlock, TemplateFile,
     generator::{
-      eval_when, excluded_paths, extract_dir_contents, to_camel_case, to_kebab_case,
-      to_pascal_case, to_snake_case,
+      eval_when, excluded_paths, extract_dir_contents, extract_template, overwritten_paths,
+      to_camel_case, to_kebab_case, to_pascal_case, to_snake_case,
     },
   },
+  utils::template_engine::{TemplateContext, hardened_env},
 };
-use tera::{Context, Tera};
 
 fn inputs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
   pairs
@@ -24,8 +24,8 @@ fn inputs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     .collect()
 }
 
-fn make_context(project_name: &str) -> Context {
-  let mut ctx = Context::new();
+fn make_context(project_name: &str) -> TemplateContext {
+  let mut ctx = TemplateContext::new();
   ctx.insert("project_name", project_name);
   ctx.insert("project_name_kebab", &to_kebab_case(project_name));
   ctx.insert("project_name_snake", &to_snake_case(project_name));
@@ -59,11 +59,11 @@ fn renders_tera_file_and_strips_extension() {
     contents: b"# {{ project_name }}".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("my-app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -82,11 +82,11 @@ fn copies_non_tera_file_unchanged() {
     contents: b"console.log('hello')".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("my-app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -105,11 +105,11 @@ fn template_vars_kebab_and_snake() {
     contents: b"{{ project_name_kebab }} {{ project_name_snake }}".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("My_Project"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -128,11 +128,11 @@ fn creates_nested_output_directories() {
     contents: b"export default () => null".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -206,11 +206,11 @@ fn path_traversal_blocked_by_extract_dir_contents() {
     contents: b"evil".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   let result = extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -226,11 +226,11 @@ fn path_traversal_with_tera_file_blocked() {
     contents: b"escaped".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   let result = extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -249,11 +249,11 @@ fn renders_all_three_case_variables() {
     contents: b"{{ project_name }} {{ project_name_kebab }} {{ project_name_snake }}".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("My_App"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -278,11 +278,11 @@ fn multiple_tera_files_rendered_independently() {
     },
   ];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("MyApp"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -305,6 +305,208 @@ fn eval_when_handles_negation_and_missing() {
   assert!(!eval_when("!use_docker", &on));
   assert!(!eval_when("use_docker", &HashMap::new()));
   assert!(eval_when("!use_docker", &HashMap::new()));
+}
+
+fn tempdir_app_context() -> (
+  assert_fs::TempDir,
+  AppContext,
+  anesis::context::CleanupState,
+) {
+  let home = assert_fs::TempDir::new().unwrap();
+  let paths = AnesisPaths::under(home.path());
+  paths.ensure_directories().unwrap();
+  let cleanup_state: anesis::context::CleanupState = Arc::new(Mutex::new(None));
+  let ctx = AppContext::new(paths, reqwest::Client::new(), cleanup_state.clone());
+  (home, ctx, cleanup_state)
+}
+
+#[test]
+fn extract_template_renders_pascal_and_camel_case_project_name() {
+  let (_home, ctx, _cleanup) = tempdir_app_context();
+  let out = assert_fs::TempDir::new().unwrap();
+  let files = vec![TemplateFile {
+    path: PathBuf::from("vars.txt.tera"),
+    contents: b"{{ project_name_pascal }} {{ project_name_camel }}".to_vec(),
+  }];
+
+  extract_template(
+    &files,
+    out.path(),
+    "my-cool-app",
+    &ctx,
+    &HashMap::new(),
+    &std::collections::HashSet::new(),
+  )
+  .unwrap();
+
+  let content = std::fs::read_to_string(out.path().join("vars.txt")).unwrap();
+  assert_eq!(
+    content, "MyCoolApp myCoolApp",
+    "project_name_pascal/_camel must be available to templates, matching \
+     insert_with_derived's convention for addon inputs"
+  );
+}
+
+#[test]
+fn extract_template_registers_partial_project_cleanup_for_a_fresh_directory() {
+  let (_home, ctx, cleanup_state) = tempdir_app_context();
+  let out = assert_fs::TempDir::new().unwrap();
+  let fresh_dir = out.path().join("does-not-exist-yet");
+  let files = vec![TemplateFile {
+    path: PathBuf::from("bad.txt.tera"),
+    contents: b"{% if x %}".to_vec(),
+  }];
+
+  let result = extract_template(
+    &files,
+    &fresh_dir,
+    "app",
+    &ctx,
+    &HashMap::new(),
+    &std::collections::HashSet::new(),
+  );
+  assert!(result.is_err(), "the malformed tera template must fail");
+
+  let guard = cleanup_state.lock().unwrap();
+  match guard.as_ref() {
+    Some(CleanupTask::PartialProject { path }) => assert_eq!(path, &fresh_dir),
+    other => panic!(
+      "expected a PartialProject cleanup task to survive the failure, got {}",
+      match other {
+        Some(_) => "a different task",
+        None =>
+          "nothing — the old bug: cleanup_state was cleared before the error \
+                  could be inspected, leaving a half-written directory with no cleanup path",
+      }
+    ),
+  }
+}
+
+#[test]
+fn extract_template_registers_only_new_files_when_the_directory_already_existed() {
+  let (_home, ctx, cleanup_state) = tempdir_app_context();
+  let out = assert_fs::TempDir::new().unwrap();
+  std::fs::create_dir_all(out.path()).unwrap();
+  std::fs::write(out.path().join("pre-existing.txt"), "keep me").unwrap();
+
+  let files = vec![
+    TemplateFile {
+      path: PathBuf::from("new-file.txt"),
+      contents: b"new content".to_vec(),
+    },
+    TemplateFile {
+      path: PathBuf::from("bad.txt.tera"),
+      contents: b"{% if x %}".to_vec(),
+    },
+  ];
+
+  let result = extract_template(
+    &files,
+    out.path(),
+    "app",
+    &ctx,
+    &HashMap::new(),
+    &std::collections::HashSet::new(),
+  );
+  assert!(result.is_err());
+
+  let guard = cleanup_state.lock().unwrap();
+  match guard.as_ref() {
+    Some(CleanupTask::PartialProjectFiles { paths }) => {
+      assert!(
+        paths.iter().any(|p| p.ends_with("new-file.txt")),
+        "the newly-created file must be tracked for cleanup: {paths:?}"
+      );
+      assert!(
+        !paths.iter().any(|p| p.ends_with("pre-existing.txt")),
+        "a file that predates this generation must never be tracked for deletion: {paths:?}"
+      );
+    }
+    other => panic!(
+      "expected PartialProjectFiles (not PartialProject — the directory already existed, \
+       so a whole-directory delete would destroy content this run never touched), got {}",
+      match other {
+        Some(_) => "a different task",
+        None => "nothing",
+      }
+    ),
+  }
+}
+
+#[test]
+fn extract_template_clears_the_cleanup_task_on_success() {
+  let (_home, ctx, cleanup_state) = tempdir_app_context();
+  let out = assert_fs::TempDir::new().unwrap();
+  let files = vec![TemplateFile {
+    path: PathBuf::from("ok.txt"),
+    contents: b"fine".to_vec(),
+  }];
+
+  extract_template(
+    &files,
+    out.path(),
+    "app",
+    &ctx,
+    &HashMap::new(),
+    &std::collections::HashSet::new(),
+  )
+  .unwrap();
+
+  assert!(
+    cleanup_state.lock().unwrap().is_none(),
+    "a successful generation must not leave a cleanup task registered"
+  );
+}
+
+#[test]
+fn overwritten_paths_and_is_excluded_agree_on_the_tera_stripped_name() {
+  let out = assert_fs::TempDir::new().unwrap();
+  std::fs::write(out.path().join("config.txt"), "old").unwrap();
+
+  let files = vec![TemplateFile {
+    path: PathBuf::from("config.txt.tera"),
+    contents: b"{{ project_name }}".to_vec(),
+  }];
+
+  let hits = overwritten_paths(&files, out.path(), &std::collections::HashSet::new()).unwrap();
+  assert_eq!(
+    hits,
+    vec![out.path().join("config.txt")],
+    "overwritten_paths must resolve the .tera file against its stripped output name, \
+     the same way extract_dir_contents actually writes it"
+  );
+}
+
+#[test]
+#[cfg(unix)]
+fn extract_template_blocks_a_template_path_that_escapes_through_a_pre_existing_symlink() {
+  let (_home, ctx, _cleanup) = tempdir_app_context();
+  let out = assert_fs::TempDir::new().unwrap();
+  let escape_target = assert_fs::TempDir::new().unwrap();
+  std::os::unix::fs::symlink(escape_target.path(), out.path().join("escape")).unwrap();
+
+  let files = vec![TemplateFile {
+    path: PathBuf::from("escape/evil.txt"),
+    contents: b"pwned".to_vec(),
+  }];
+
+  let result = extract_template(
+    &files,
+    out.path(),
+    "app",
+    &ctx,
+    &HashMap::new(),
+    &std::collections::HashSet::new(),
+  );
+
+  assert!(
+    result.is_err(),
+    "writing through a pre-existing symlink must be blocked"
+  );
+  assert!(
+    !escape_target.path().join("evil.txt").exists(),
+    "the file must never be written outside the output directory"
+  );
 }
 
 #[test]

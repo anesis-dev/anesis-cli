@@ -75,3 +75,26 @@ fn write_auth_file_sets_owner_only_permissions() {
     "auth file must be readable/writable only by owner"
   );
 }
+
+#[cfg(unix)]
+#[test]
+fn write_auth_file_tightens_permissions_on_a_pre_existing_world_readable_file() {
+  use std::os::unix::fs::MetadataExt;
+  use std::os::unix::fs::PermissionsExt;
+
+  let dir = assert_fs::TempDir::new().unwrap();
+  let path = dir.path().join("auth.json");
+
+  std::fs::write(&path, r#"{"token":"old","name":"old"}"#).unwrap();
+  std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+  write_auth_file_for_tests(&path, r#"{"token":"new","name":"new"}"#).unwrap();
+
+  let meta = std::fs::metadata(&path).unwrap();
+  assert_eq!(
+    meta.mode() & 0o777,
+    0o600,
+    "a re-login must tighten permissions on an already-existing world-readable auth.json, \
+     not just on freshly-created files"
+  );
+}

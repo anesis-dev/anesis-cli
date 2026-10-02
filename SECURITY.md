@@ -30,7 +30,7 @@ comfortable with.
 
 ### Templates
 
-A template is a directory of files rendered through Tera and written into your
+A template is a directory of files rendered through MiniJinja and written into your
 new project. Nothing in a template executes during scaffolding. Template paths
 are normalised and refused if they would escape the output directory.
 
@@ -55,17 +55,19 @@ Two step kinds do more:
   be rolled back — `anesis undo` reports it as an irreversible action and leaves
   its effects in place.
 
-### `run` steps require explicit consent
+### `run` and `packages` steps require explicit consent
 
-Interactively, Anesis prints the exact command and asks before executing it. The
-default answer is **no**.
+Both execute code you did not write: `run` is an arbitrary shell command, and
+`packages` invokes your package manager, which runs the installed packages'
+own lifecycle scripts. Interactively, Anesis prints the exact command and asks
+before executing it. The default answer is **no**.
 
-Non-interactively there is nobody to ask, so a `run` step is **refused** unless
-you pass `--allow-run` or set `ANESIS_ALLOW_RUN=1`:
+Non-interactively there is nobody to ask, so a `run` or `packages` step is
+**refused** unless you pass `--allow-run` or set `ANESIS_ALLOW_RUN=1`:
 
 ```bash
-anesis use some-addon setup --yes                # run steps are refused
-anesis use some-addon setup --yes --allow-run    # run steps execute
+anesis use some-addon setup --yes                # run/packages steps are refused
+anesis use some-addon setup --yes --allow-run    # run/packages steps execute
 ```
 
 `--yes` deliberately does not imply `--allow-run`. "Accept the defaults" and
@@ -98,6 +100,23 @@ During `anesis login` the CLI starts a listener on `127.0.0.1` (ports 8080–808
 and the backend redirects the browser to it with the JWT in the query string.
 That URL never leaves the loopback interface; it is a query parameter rather than
 a fragment because the local listener cannot read a fragment.
+
+## Verifying release artifacts
+
+Every release publishes `SHA256SUMS` alongside the archives, and both the
+archives and `SHA256SUMS` carry a
+[GitHub build provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds)
+proving they were built by this repository's release workflow from the tagged
+commit — not hand-uploaded.
+
+```bash
+curl -LO https://github.com/anesis-dev/anesis-cli/releases/download/v1.0.0/anesis-linux-x86_64.tar.gz
+curl -LO https://github.com/anesis-dev/anesis-cli/releases/download/v1.0.0/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+
+gh attestation verify anesis-linux-x86_64.tar.gz --repo anesis-dev/anesis-cli
+gh attestation verify SHA256SUMS --repo anesis-dev/anesis-cli
+```
 
 ## Out of scope
 

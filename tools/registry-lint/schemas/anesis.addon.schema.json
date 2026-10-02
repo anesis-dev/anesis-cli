@@ -252,6 +252,7 @@
 					"required": ["type", "src", "dest"],
 					"properties": {
 						"type": { "const": "copy" },
+						"when": { "type": "string" },
 						"src": { "type": "string" },
 						"dest": { "type": "string" },
 						"if_exists": { "$ref": "#/$defs/ifExists" }
@@ -263,6 +264,7 @@
 					"required": ["type", "path", "content"],
 					"properties": {
 						"type": { "const": "create" },
+						"when": { "type": "string" },
 						"path": { "type": "string" },
 						"content": { "type": "string" },
 						"if_exists": { "$ref": "#/$defs/ifExists" }
@@ -275,6 +277,7 @@
 					"required": ["type", "target", "content"],
 					"properties": {
 						"type": { "const": "inject" },
+						"when": { "type": "string" },
 						"target": { "$ref": "#/$defs/target" },
 						"content": { "type": "string" },
 						"after": { "type": "string" },
@@ -288,6 +291,7 @@
 					"required": ["type", "target", "find", "replace"],
 					"properties": {
 						"type": { "const": "replace" },
+						"when": { "type": "string" },
 						"target": { "$ref": "#/$defs/target" },
 						"find": { "type": "string" },
 						"replace": { "type": "string" },
@@ -300,6 +304,7 @@
 					"required": ["type", "target", "content"],
 					"properties": {
 						"type": { "const": "append" },
+						"when": { "type": "string" },
 						"target": { "$ref": "#/$defs/target" },
 						"content": { "type": "string" }
 					}
@@ -310,6 +315,7 @@
 					"required": ["type", "target"],
 					"properties": {
 						"type": { "const": "delete" },
+						"when": { "type": "string" },
 						"target": { "$ref": "#/$defs/target" }
 					}
 				},
@@ -319,6 +325,7 @@
 					"required": ["type", "from", "to"],
 					"properties": {
 						"type": { "const": "rename" },
+						"when": { "type": "string" },
 						"from": { "type": "string" },
 						"to": { "type": "string" }
 					}
@@ -329,6 +336,7 @@
 					"required": ["type", "from", "to"],
 					"properties": {
 						"type": { "const": "move" },
+						"when": { "type": "string" },
 						"from": { "type": "string" },
 						"to": { "type": "string" }
 					}
@@ -339,6 +347,7 @@
 					"required": ["type"],
 					"properties": {
 						"type": { "const": "packages" },
+						"when": { "type": "string" },
 						"dependencies": { "type": "array", "items": { "type": "string" } },
 						"dev_dependencies": { "type": "array", "items": { "type": "string" } }
 					}
@@ -349,8 +358,21 @@
 					"required": ["type", "command"],
 					"properties": {
 						"type": { "const": "run" },
+						"when": { "type": "string" },
 						"command": { "type": "string" },
 						"description": { "type": "string" }
+					}
+				},
+				{
+					"type": "object",
+					"additionalProperties": false,
+					"required": ["type", "path"],
+					"properties": {
+						"type": { "const": "json_patch" },
+						"when": { "type": "string" },
+						"path": { "type": "string" },
+						"set": { "type": "object" },
+						"remove": { "type": "array", "items": { "type": "string" } }
 					}
 				}
 			]

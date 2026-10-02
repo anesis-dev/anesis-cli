@@ -1,15 +1,10 @@
-use std::{
-  collections::HashMap,
-  path::{Path, PathBuf},
-  process::Command,
-};
+use std::{collections::HashMap, path::PathBuf};
 
 use anyhow::{Context, Result, bail};
-use colored::Colorize;
 
-use crate::{context::AppContext, utils::fs::copy_dir_respecting_gitignore};
+use crate::{context::AppContext, utils::fs::copy_dir_respecting_gitignore, utils::ui};
 
-use super::runner::run_addon_command;
+use super::{diff::show_diff, runner::run_addon_command};
 
 pub async fn test_addon(
   ctx: &AppContext,
@@ -32,8 +27,8 @@ pub async fn test_addon(
 
   println!(
     "Testing {} {} on a copy of {} (original untouched)...\n",
-    addon_id.cyan(),
-    command.cyan(),
+    ui::accent(addon_id),
+    ui::accent(command),
     fixture.display()
   );
 
@@ -48,9 +43,18 @@ pub async fn test_addon(
   )
   .await?;
 
-  println!("\n{}", "Diff (changes the addon made):".bold());
+  println!("\n{}", ui::bold("Diff (changes the addon made):"));
   show_diff(baseline.path(), work.path());
   Ok(())
+}
+
+#[doc(hidden)]
+pub fn resolve_fixture_for_tests(
+  ctx: &AppContext,
+  addon_id: &str,
+  project: Option<String>,
+) -> Result<PathBuf> {
+  resolve_fixture(ctx, addon_id, project)
 }
 
 fn resolve_fixture(ctx: &AppContext, addon_id: &str, project: Option<String>) -> Result<PathBuf> {
@@ -68,35 +72,4 @@ fn resolve_fixture(ctx: &AppContext, addon_id: &str, project: Option<String>) ->
   bail!(
     "No fixture project. Pass --project <path> or ship a 'test-fixture/' directory with the addon."
   )
-}
-
-fn show_diff(baseline: &Path, work: &Path) {
-  let Ok(diff) = which::which("diff") else {
-    eprintln!(
-      "('diff' was not found on PATH; cannot show changes. \
-       On Windows, install Git for Windows or run this inside WSL.)"
-    );
-    eprintln!("  baseline: {}", baseline.display());
-    eprintln!("  after:    {}", work.display());
-    return;
-  };
-
-  match Command::new(diff)
-    .arg("-ruN")
-    .arg("-x")
-    .arg("anesis.lock")
-    .arg(baseline)
-    .arg(work)
-    .output()
-  {
-    Ok(out) => {
-      let text = String::from_utf8_lossy(&out.stdout);
-      if text.trim().is_empty() {
-        println!("(the addon made no changes)");
-      } else {
-        print!("{text}");
-      }
-    }
-    Err(_) => eprintln!("(system 'diff' not available; cannot show changes)"),
-  }
 }

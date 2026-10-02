@@ -1,13 +1,16 @@
 pub mod cache;
 pub mod catalog;
 pub mod detect;
+pub mod diff;
 pub mod info;
 pub mod install;
 pub mod link;
+pub mod lint;
 pub mod lock;
 pub mod manifest;
 pub mod publish;
 pub mod republish;
 pub mod runner;
 pub mod steps;
+pub mod summary;
 pub mod test;

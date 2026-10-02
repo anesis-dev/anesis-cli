@@ -5,7 +5,7 @@ use inquire::Confirm;
 
 use crate::{context::AppContext, utils::fs::copy_dir_respecting_gitignore};
 
-use super::{cache::update_addons_cache, manifest::AddonManifest};
+use super::{cache::update_addons_cache, manifest};
 
 pub fn link_addon(ctx: &AppContext, source: &Path, force: bool) -> Result<Option<String>> {
   let manifest_path = source.join("anesis.addon.json");
@@ -15,10 +15,15 @@ pub fn link_addon(ctx: &AppContext, source: &Path, force: bool) -> Result<Option
       manifest_path.display()
     )
   })?;
-  let manifest: AddonManifest =
-    serde_json::from_str(&content).context("Invalid anesis.addon.json structure")?;
+  let manifest = manifest::parse(&content)?;
 
   let dest = ctx.paths.addons.join(&manifest.id);
+  if !dest.starts_with(&ctx.paths.addons) {
+    anyhow::bail!(
+      "addon id '{}' would resolve outside the addons cache directory",
+      manifest.id
+    );
+  }
   if dest.exists() {
     if !force
       && !Confirm::new(&format!(

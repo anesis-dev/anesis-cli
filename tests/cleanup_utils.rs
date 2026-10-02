@@ -124,6 +124,28 @@ fn pruning_a_path_outside_the_root_removes_nothing() {
 }
 
 #[test]
+fn partial_download_outside_prune_root_is_refused() {
+  let root = assert_fs::TempDir::new().unwrap();
+  let addons_dir = root.path().join("cache").join("addons");
+  std::fs::create_dir_all(&addons_dir).unwrap();
+  let victim = root.path().join("victim");
+  std::fs::create_dir_all(victim.join("keep-me")).unwrap();
+  std::fs::write(victim.join("keep-me").join("file.txt"), "important").unwrap();
+
+  run_cleanup(&CleanupTask::PartialDownload {
+    path: victim.clone(),
+    prune_root: addons_dir.clone(),
+    label: "addon",
+  });
+
+  assert!(
+    victim.exists(),
+    "a path outside prune_root must never be removed"
+  );
+  assert!(victim.join("keep-me").join("file.txt").exists());
+}
+
+#[test]
 fn partial_project_is_removed_wholesale() {
   let root = assert_fs::TempDir::new().unwrap();
   let project: PathBuf = root.path().join("my-app");

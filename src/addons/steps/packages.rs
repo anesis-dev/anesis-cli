@@ -2,10 +2,11 @@ use std::path::Path;
 use std::process::Command;
 
 use anyhow::{Context, Result, bail};
+use inquire::Confirm;
 
-use crate::addons::manifest::PackagesStep;
+use crate::{addons::manifest::PackagesStep, utils::ui};
 
-use super::Rollback;
+use super::{Rollback, StepFailure, StepResult};
 
 enum PackageManager {
   Npm,
@@ -51,6 +52,28 @@ impl PackageManager {
   }
 }
 
+fn describe_install(pm: &PackageManager, step: &PackagesStep) -> String {
+  let mut commands = Vec::new();
+  if !step.dependencies.is_empty() {
+    commands.push(format!(
+      "{} {} {}",
+      pm.program(),
+      pm.add_args().join(" "),
+      step.dependencies.join(" ")
+    ));
+  }
+  if !step.dev_dependencies.is_empty() {
+    commands.push(format!(
+      "{} {} {} {}",
+      pm.program(),
+      pm.add_args().join(" "),
+      pm.dev_flag(),
+      step.dev_dependencies.join(" ")
+    ));
+  }
+  commands.join(" && ")
+}
+
 fn detect_pm(root: &Path) -> Result<PackageManager> {
   if root.join("bun.lock").exists() || root.join("bun.lockb").exists() {
     Ok(PackageManager::Bun)
@@ -67,29 +90,68 @@ fn detect_pm(root: &Path) -> Result<PackageManager> {
   }
 }
 
-pub fn execute_packages(step: &PackagesStep, project_root: &Path) -> Result<Vec<Rollback>> {
+fn missing_pm_error(program: &str, err: which::Error) -> anyhow::Error {
+  anyhow::Error::new(err).context(format!(
+    "'{program}' was not found on PATH — is it installed?"
+  ))
+}
+
+pub fn execute_packages(
+  step: &PackagesStep,
+  project_root: &Path,
+  non_interactive: bool,
+  allow_run: bool,
+) -> StepResult {
+  execute_packages_inner(step, project_root, non_interactive, allow_run)
+    .map_err(StepFailure::without_rollbacks)
+}
+
+fn execute_packages_inner(
+  step: &PackagesStep,
+  project_root: &Path,
+  non_interactive: bool,
+  allow_run: bool,
+) -> Result<Vec<Rollback>> {
   if step.dependencies.is_empty() && step.dev_dependencies.is_empty() {
     return Ok(Vec::new());
   }
   let pm = detect_pm(project_root)?;
 
+  if !allow_run {
+    let summary = describe_install(&pm, step);
+    println!(
+      "  {} {}",
+      ui::muted("will run:"),
+      ui::yellow(crate::utils::sanitize::sanitize_for_display(&summary))
+    );
+
+    if non_interactive {
+      bail!(
+        "this addon wants to install packages, and there is nobody to ask:\n  {summary}\n\n\
+         Re-run with --allow-run (or set ANESIS_ALLOW_RUN=1) if you trust this addon. \
+         `--yes` deliberately does not cover package installation."
+      );
+    }
+
+    if !Confirm::new("Install these packages?")
+      .with_default(false)
+      .prompt()?
+    {
+      bail!("packages step declined: '{summary}'");
+    }
+  }
+
   let mut rollbacks = Vec::new();
   for name in pm.snapshot_files() {
     let path = project_root.join(name);
     if path.exists() {
-      rollbacks.push(Rollback::RestoreFile {
-        path: path.clone(),
-        original: std::fs::read(&path)?,
-      });
+      rollbacks.push(Rollback::restore_file(path.clone(), std::fs::read(&path)?));
+    } else {
+      rollbacks.push(Rollback::DeleteCreatedFile { path });
     }
   }
 
-  let program = which::which(pm.program()).with_context(|| {
-    format!(
-      "'{}' was not found on PATH — is it installed?",
-      pm.program()
-    )
-  })?;
+  let program = which::which(pm.program()).map_err(|e| missing_pm_error(pm.program(), e))?;
 
   let run = |extra: &[&str], specs: &[String]| -> Result<()> {
     let status = Command::new(&program)
@@ -122,8 +184,14 @@ pub fn execute_packages(step: &PackagesStep, project_root: &Path) -> Result<Vec<
 
   if let Err(err) = result {
     for rb in rollbacks.iter().rev() {
-      if let Rollback::RestoreFile { path, original } = rb {
-        let _ = std::fs::write(path, original);
+      match rb {
+        Rollback::RestoreFile { path, original, .. } => {
+          let _ = std::fs::write(path, original);
+        }
+        Rollback::DeleteCreatedFile { path } => {
+          let _ = std::fs::remove_file(path);
+        }
+        _ => {}
       }
     }
     return Err(err);
@@ -134,4 +202,9 @@ pub fn execute_packages(step: &PackagesStep, project_root: &Path) -> Result<Vec<
 
 pub fn detect_pm_for_tests(root: &Path) -> Result<&'static str> {
   detect_pm(root).map(|pm| pm.program())
+}
+
+#[doc(hidden)]
+pub fn missing_pm_error_for_tests(program: &str, err: which::Error) -> anyhow::Error {
+  missing_pm_error(program, err)
 }

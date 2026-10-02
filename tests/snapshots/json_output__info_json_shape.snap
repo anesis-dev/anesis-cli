@@ -4,7 +4,7 @@ expression: "cli.json(&[\"info\", \"--json\"])"
 ---
 {
   "account": null,
-  "backend": "https://anesis-server.onrender.com",
+  "backend": "https://api.anesis.tech",
   "installed": {
     "addons": 0,
     "templates": 0

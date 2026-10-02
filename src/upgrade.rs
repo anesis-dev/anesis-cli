@@ -12,7 +12,10 @@ use reqwest::{
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::{context::AppContext, utils::ui::spinner};
+use crate::{
+  context::AppContext,
+  utils::ui::{self, spinner},
+};
 
 const RELEASES_API_URL: &str = "https://api.github.com/repos/anesis-dev/anesis-cli/releases/latest";
 const RELEASES_DOWNLOAD_BASE_URL: &str =
@@ -61,7 +64,7 @@ pub async fn upgrade_cli(ctx: &AppContext) -> Result<()> {
   }
 
   let platform = current_platform()?;
-  let asset_url = release_asset_url(&latest_version, platform);
+  let asset_url = release_asset_url(&releases_download_base_url(), &latest_version, platform)?;
   let current_exe = env::current_exe().context("Failed to locate the current Anesis executable")?;
 
   let sp = spinner(format!("Downloading Anesis v{latest_version}..."));
@@ -83,7 +86,8 @@ pub async fn upgrade_cli(ctx: &AppContext) -> Result<()> {
   sp.finish_and_clear();
 
   let sp = spinner("Verifying checksum...");
-  let checksums_url = release_checksums_url(&latest_version);
+  let checksums_url = release_checksums_url(&releases_download_base_url(), &latest_version)
+    .inspect_err(|_| sp.finish_and_clear())?;
   let checksums = ctx
     .client
     .get(&checksums_url)
@@ -112,8 +116,28 @@ pub async fn upgrade_cli(ctx: &AppContext) -> Result<()> {
   mark_executable(&temp_exe)?;
   replace_current_executable(&current_exe, &temp_exe)?;
 
-  println!("✓ Anesis updated to v{latest_version}. Restart your shell if needed.");
+  println!(
+    "{}",
+    upgrade_success_message(&latest_version, cfg!(windows))
+  );
   Ok(())
+}
+
+fn upgrade_success_message(latest_version: &str, deferred_swap: bool) -> String {
+  let ok = ui::symbols::ok();
+  if deferred_swap {
+    format!(
+      "{ok} Anesis v{latest_version} downloaded and verified; finishing the install in the \
+       background. Restart your shell in a few seconds."
+    )
+  } else {
+    format!("{ok} Anesis updated to v{latest_version}. Restart your shell if needed.")
+  }
+}
+
+#[doc(hidden)]
+pub fn upgrade_success_message_for_tests(latest_version: &str, deferred_swap: bool) -> String {
+  upgrade_success_message(latest_version, deferred_swap)
 }
 
 pub async fn check_cli_version_cached(client: &Client, path: &Path) -> Result<Option<String>> {
@@ -206,7 +230,7 @@ pub fn parse_version_prerelease_for_tests(version: &str) -> Result<String> {
   Ok(parse_version(version)?.pre.to_string())
 }
 
-fn is_newer_version(current: &str, latest: &str) -> Result<bool> {
+pub(crate) fn is_newer_version(current: &str, latest: &str) -> Result<bool> {
   Ok(parse_version(latest)? > parse_version(current)?)
 }
 
@@ -282,9 +306,33 @@ fn extract_binary_from_archive(bytes: &[u8], platform: &str) -> Result<Vec<u8>> 
   }
 }
 
+const MAX_EXTRACTED_BINARY_BYTES: u64 = 200 * 1024 * 1024;
+
+fn read_capped_binary(mut reader: impl std::io::Read, context: &'static str) -> Result<Vec<u8>> {
+  use std::io::Read as _;
+  let mut binary = Vec::new();
+  reader
+    .by_ref()
+    .take(MAX_EXTRACTED_BINARY_BYTES + 1)
+    .read_to_end(&mut binary)
+    .context(context)?;
+  if binary.len() as u64 > MAX_EXTRACTED_BINARY_BYTES {
+    return Err(anyhow!(
+      "extracted binary exceeds the {MAX_EXTRACTED_BINARY_BYTES} byte limit"
+    ));
+  }
+  Ok(binary)
+}
+
+fn binary_basename_matches(name: &std::path::Path, extra: &[&str]) -> bool {
+  let Some(basename) = name.file_name().and_then(|n| n.to_str()) else {
+    return false;
+  };
+  basename == "anesis" || extra.contains(&basename)
+}
+
 fn extract_from_targz(bytes: &[u8]) -> Result<Vec<u8>> {
   use flate2::read::GzDecoder;
-  use std::io::Read;
   use tar::Archive;
 
   let gz = GzDecoder::new(bytes);
@@ -294,19 +342,13 @@ fn extract_from_targz(bytes: &[u8]) -> Result<Vec<u8>> {
     .entries()
     .context("Failed to read tar archive entries")?
   {
-    let mut entry = entry.context("Failed to read tar archive entry")?;
-    let path = entry.path().context("Failed to read entry path")?;
-    let filename = path
-      .file_name()
-      .and_then(|n| n.to_str())
-      .unwrap_or("")
-      .to_string();
-    if filename == "anesis" {
-      let mut binary = Vec::new();
-      entry
-        .read_to_end(&mut binary)
-        .context("Failed to read binary from archive")?;
-      return Ok(binary);
+    let entry = entry.context("Failed to read tar archive entry")?;
+    let path = entry
+      .path()
+      .context("Failed to read entry path")?
+      .into_owned();
+    if binary_basename_matches(&path, &[]) {
+      return read_capped_binary(entry, "Failed to read binary from archive");
     }
   }
 
@@ -314,21 +356,17 @@ fn extract_from_targz(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 fn extract_from_zip(bytes: &[u8]) -> Result<Vec<u8>> {
-  use std::io::{Cursor, Read};
+  use std::io::Cursor;
   use zip::ZipArchive;
 
   let cursor = Cursor::new(bytes);
   let mut archive = ZipArchive::new(cursor).context("Failed to read zip archive")?;
 
   for i in 0..archive.len() {
-    let mut file = archive.by_index(i).context("Failed to read zip entry")?;
-    let name = file.name().to_string();
-    if name == "anesis.exe" || name == "anesis" {
-      let mut binary = Vec::new();
-      file
-        .read_to_end(&mut binary)
-        .context("Failed to read binary from zip")?;
-      return Ok(binary);
+    let file = archive.by_index(i).context("Failed to read zip entry")?;
+    let name = std::path::PathBuf::from(file.name());
+    if binary_basename_matches(&name, &["anesis.exe"]) {
+      return read_capped_binary(file, "Failed to read binary from zip");
     }
   }
 
@@ -336,30 +374,40 @@ fn extract_from_zip(bytes: &[u8]) -> Result<Vec<u8>> {
 }
 
 #[doc(hidden)]
+pub fn extract_from_targz_for_tests(bytes: &[u8]) -> Result<Vec<u8>> {
+  extract_from_targz(bytes)
+}
+
+#[doc(hidden)]
+pub fn extract_from_zip_for_tests(bytes: &[u8]) -> Result<Vec<u8>> {
+  extract_from_zip(bytes)
+}
+
+#[doc(hidden)]
 pub fn asset_filename_for_tests(platform: &str) -> String {
   asset_filename(platform)
 }
 
-fn release_asset_url(version: &str, platform: &str) -> String {
-  format!(
-    "{}/v{version}/{}",
-    releases_download_base_url(),
-    asset_filename(platform)
-  )
+fn release_asset_url(base: &str, version: &str, platform: &str) -> Result<String> {
+  let url = format!("{base}/v{version}/{}", asset_filename(platform));
+  crate::utils::validate::require_https_url(&url, "release asset URL")?;
+  Ok(url)
 }
 
 #[doc(hidden)]
-pub fn release_asset_url_for_tests(version: &str, platform: &str) -> String {
-  release_asset_url(version, platform)
+pub fn release_asset_url_for_tests(base: &str, version: &str, platform: &str) -> Result<String> {
+  release_asset_url(base, version, platform)
 }
 
-fn release_checksums_url(version: &str) -> String {
-  format!("{}/v{version}/SHA256SUMS", releases_download_base_url())
+fn release_checksums_url(base: &str, version: &str) -> Result<String> {
+  let url = format!("{base}/v{version}/SHA256SUMS");
+  crate::utils::validate::require_https_url(&url, "release checksums URL")?;
+  Ok(url)
 }
 
 #[doc(hidden)]
-pub fn release_checksums_url_for_tests(version: &str) -> String {
-  release_checksums_url(version)
+pub fn release_checksums_url_for_tests(base: &str, version: &str) -> Result<String> {
+  release_checksums_url(base, version)
 }
 
 fn expected_checksum(checksums: &str, asset_name: &str) -> Result<String> {
@@ -446,6 +494,7 @@ fn replace_current_executable(current_exe: &Path, temp_exe: &Path) -> Result<()>
 
 #[cfg(windows)]
 fn replace_current_executable(current_exe: &Path, temp_exe: &Path) -> Result<()> {
+  use std::os::windows::process::CommandExt;
   use std::process::Command;
 
   let updater_script =
@@ -454,9 +503,10 @@ fn replace_current_executable(current_exe: &Path, temp_exe: &Path) -> Result<()>
   fs::write(&updater_script, script)
     .with_context(|| format!("Failed to write {}", updater_script.display()))?;
 
-  let updater_script = path_for_shell(&updater_script)?;
+  let quoted_script = quoted_windows_path(&updater_script)?;
   Command::new("cmd")
-    .args(["/C", "start", "", "/B", updater_script.as_str()])
+    .arg("/C")
+    .raw_arg(format!("start \"\" /B {quoted_script}"))
     .spawn()
     .context("Failed to start the Windows updater helper")?;
   Ok(())

@@ -10,7 +10,7 @@ use crate::{
   templates::AnesisTemplate,
   utils::{
     picker::{ItemKind, PickItem},
-    ui::catalog_table,
+    ui::{self, catalog_table},
   },
 };
 
@@ -69,6 +69,14 @@ pub fn update_templates_cache(
   let template_info: AnesisTemplate = serde_json::from_str(&content)?;
 
   crate::compat::check_anesis_version(&template_info.name, &template_info.anesis_version)?;
+
+  let requested_name = path.to_string_lossy();
+  anyhow::ensure!(
+    template_info.name == requested_name,
+    "template '{requested_name}' was installed, but its manifest declares a different name \
+     ('{}'); refusing to cache it to avoid a directory/name mismatch",
+    template_info.name
+  );
 
   let templates_json = template_path.join("anesis-templates.json");
   let mut templates_info: TemplatesCache = if templates_json.exists() {
@@ -179,7 +187,7 @@ pub fn remove_template_from_cache(template_path: &Path, template_name: &str) -> 
     serde_json::to_string_pretty(&templates_info)?,
   )?;
 
-  println!("✓ Removed template '{}'", template_name);
+  ui::success(format!("Removed template '{template_name}'"));
   Ok(())
 }
 

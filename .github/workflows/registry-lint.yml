@@ -7,6 +7,14 @@ on:
         description: "Which registry repo triggered this: templates | addons | stacks"
         required: true
         type: string
+      cli_ref:
+        description: "anesis-cli ref to build registry-lint from (a release tag, not a branch)"
+        required: false
+        type: string
+        default: v1.0.0
+
+permissions:
+  contents: read
 
 jobs:
   lint:
@@ -17,6 +25,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: anesis-dev/anesis-cli
+          ref: ${{ inputs.cli_ref }}
           path: cli
 
       - name: Checkout this repo (${{ inputs.caller }})
@@ -46,10 +55,10 @@ jobs:
           path: registry/stacks
 
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Cache cargo build
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
         with:
           workspaces: cli/tools/registry-lint
 

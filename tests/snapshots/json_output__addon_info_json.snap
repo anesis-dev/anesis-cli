@@ -25,7 +25,8 @@ expression: "cli.json(&[\"addon\", \"info\", \"docker-compose\", \"--json\"])"
               "content": "services: {}\n",
               "if_exists": "skip",
               "path": "docker-compose.yml",
-              "type": "create"
+              "type": "create",
+              "when": null
             }
           ]
         }

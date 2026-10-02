@@ -16,8 +16,8 @@ anyhow = "1.0"
 # Same version the CLI resolves `glob` targets with, so a pattern that lints
 # clean here resolves the same way at apply time.
 glob = "0.3"
-# `toml_contains` detect rules — the Rust addons select their variant with one.
-toml = "0.9"
+# `toml_contains` detect rules — pinned to the same version as the CLI's Cargo.toml.
+toml = "1.0.1"
 
 [dev-dependencies]
 tempfile = "3"

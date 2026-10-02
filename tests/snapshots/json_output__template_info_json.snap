@@ -4,6 +4,10 @@ expression: "cli.json(&[\"template\", \"info\", \"react-vite-ts\", \"--json\"])"
 ---
 {
   "anesisVersion": ">=1.0.0",
+  "author": {
+    "github": "anesis-dev",
+    "name": "Anesis"
+  },
   "exclude": [],
   "inputs": [
     {
@@ -15,13 +19,28 @@ expression: "cli.json(&[\"template\", \"info\", \"react-vite-ts\", \"--json\"])"
       "type": "boolean"
     }
   ],
+  "languages": [
+    "typescript"
+  ],
   "metadata": {
     "description": "A React SPA scaffolded with Vite.",
-    "displayName": "React + Vite (TypeScript)"
+    "displayName": "React + Vite (TypeScript)",
+    "tags": [
+      "react",
+      "vite",
+      "spa"
+    ]
   },
   "name": "react-vite-ts",
   "repository": {
     "url": "https://github.com/anesis-dev/templates"
   },
+  "scope": "web",
+  "specialization": "frontend",
+  "technologies": [
+    "react",
+    "vite"
+  ],
+  "type": "base",
   "version": "0.2.0"
 }

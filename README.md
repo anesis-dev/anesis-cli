@@ -26,13 +26,15 @@ anesis status                       # show the project's template + applied addo
 ## Commands
 
 ```text
-anesis new <NAME> [TEMPLATE]        create a project (--stack to scaffold template + addons)
+anesis new <NAME> [TEMPLATE]        create a project (--stack to scaffold template + addons; --dry-run to preview)
 anesis template <install|link|list|info|remove|publish|republish>
 anesis addon <install|link|list|info|test|remove|publish|republish>
 anesis stack <install|link|list|info|remove|publish|republish>
-anesis use [ADDON] [COMMAND]        run an addon command in the current project
+anesis use [ADDON] [COMMAND]        run an addon command in the current project (--dry-run to preview, --diff to try it on a scratch copy)
 anesis undo <ADDON>                 revert an applied addon's changes
-anesis outdated / anesis update <ADDON>
+anesis outdated / anesis update <ADDON>|--all
+anesis why [PATH]                   show which addon command created/modified a file (omit PATH to list all)
+anesis doctor                       diagnose common environment/project problems
 anesis search [QUERY]               search templates/addons/stacks
 anesis login / logout / account
 anesis mcp                          run an MCP stdio server for AI agents
@@ -65,6 +67,7 @@ Available on every subcommand:
 | `-v`, `--verbose` | debug logging for anesis itself (`-vv` for trace). Goes to stderr, so `--json` stdout stays clean. |
 | `-q`, `--quiet` | no progress spinners, no upgrade notice. Results, errors and exit codes are unchanged. |
 | `--no-color` | plain output. Also implied when stdout is not a terminal, or when `NO_COLOR` is set. |
+| `--ascii` | ASCII glyphs (`[ok]`, `->`, `*`) instead of Unicode (`✓`, `→`, `•`). Also implied by `ANESIS_ASCII`, non-UTF-8 locales, and plain `cmd.exe`. |
 | `--no-telemetry` | see [Telemetry](#telemetry). |
 | `--allow-run` | see [Running remote code](#running-remote-code). |
 
@@ -99,16 +102,17 @@ version-check cache. Inside a scaffolded project, applied addons are tracked in
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANESIS_BACKEND_URL` | `https://anesis-server.onrender.com` | Registry API to talk to. |
-| `ANESIS_FRONTEND_URL` | `https://anesis-dev.vercel.app` | Web app used for login redirects. |
+| `ANESIS_BACKEND_URL` | `https://api.anesis.tech` | Registry API to talk to. |
+| `ANESIS_FRONTEND_URL` | `https://anesis.tech` | Web app used for login redirects. |
 | `ANESIS_TOKEN` | — | Personal access token, for CI. Skips `anesis login`. |
 | `ANESIS_NO_TELEMETRY` | unset | Set to disable install-count reporting (see below). |
-| `ANESIS_ALLOW_RUN` | unset | Set to permit addon `run` steps without a prompt (see below). |
+| `ANESIS_ALLOW_RUN` | unset | Set to permit addon `run`/`packages` steps without a prompt (see below). |
 | `ANESIS_DEBUG` | unset | Full error chains and panic backtraces instead of friendly messages. |
 | `ANESIS_RELEASES_API_URL` | GitHub releases API | Override for `anesis upgrade`; mainly for testing. |
 | `ANESIS_RELEASES_DOWNLOAD_BASE_URL` | GitHub releases downloads | Override for `anesis upgrade`; mainly for testing. |
 | `RUST_LOG` | unset | Standard `env_logger` filter, e.g. `RUST_LOG=debug`. Overrides `-v`. |
 | `NO_COLOR` | unset | Standard [no-color](https://no-color.org/) opt-out; same effect as `--no-color`. |
+| `ANESIS_ASCII` | unset | Same effect as `--ascii`. |
 
 ## Telemetry
 
@@ -130,12 +134,14 @@ export ANESIS_NO_TELEMETRY=1        # or set it once for the whole shell
 
 ## Running remote code
 
-Addons can contain `run` steps — arbitrary shell commands that come from a
-registry entry, not from you. Anesis asks before each one.
+Addons can contain `run` steps (arbitrary shell commands) and `packages` steps
+(package manager installs, which run the installed packages' own lifecycle
+scripts) — both come from a registry entry, not from you. Anesis asks before
+each one.
 
 `--yes` does **not** cover this. Skipping the prompt requires `--allow-run` (or
-`ANESIS_ALLOW_RUN=1`) so that "accept the defaults" and "execute shell commands
-someone else wrote" stay separate decisions. This matters most for `--stack` and
+`ANESIS_ALLOW_RUN=1`) so that "accept the defaults" and "execute code someone
+else wrote" stay separate decisions. This matters most for `--stack` and
 for `anesis mcp`, where an AI agent drives the CLI and there is nobody to ask.
 
 The full trust model is in [SECURITY.md](SECURITY.md).

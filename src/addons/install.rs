@@ -7,7 +7,11 @@ use serde::Deserialize;
 use crate::{
   auth::token::get_auth_user,
   context::{AppContext, CleanupTask},
-  utils::{archive::download_and_extract, errors::classify_reqwest_error, ui::spinner},
+  utils::{
+    archive::download_and_extract,
+    errors::classify_reqwest_error,
+    ui::{self, spinner},
+  },
 };
 
 use super::{
@@ -165,6 +169,8 @@ async fn get_addon_url_raw(
 }
 
 pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInstallResult> {
+  let addon_dir = ctx.paths.addon_dir(addon_id)?;
+
   let sp = spinner(format!("Fetching info for addon '{addon_id}'..."));
   let info = get_addon_url(ctx, addon_id)
     .await
@@ -172,7 +178,6 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
   sp.finish_and_clear();
 
   let addons_dir = &ctx.paths.addons;
-  let addon_dir = addons_dir.join(addon_id);
   let cached_addon = get_cached_addon(addons_dir, addon_id)
     .with_context(|| format!("Failed to read addons cache while checking '{addon_id}'"))?;
   let install_state =
@@ -203,7 +208,9 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
   } else {
     "Downloading"
   };
-  let sp = spinner(format!("{action} addon '{addon_id}'..."));
+  if !ui::is_quiet() {
+    println!("{action} addon '{addon_id}'...");
+  }
   let download_result = download_and_extract(
     &ctx.client,
     &info.archive_url,
@@ -218,7 +225,6 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
       info.archive_url
     )
   });
-  sp.finish_and_clear();
 
   {
     let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
@@ -236,10 +242,8 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
     )
   })?;
 
-  let manifest: AddonManifest = serde_json::from_str(&content)
+  let manifest: AddonManifest = super::manifest::parse(&content)
     .with_context(|| format!("Failed to parse anesis.addon.json for addon '{addon_id}'"))?;
-
-  crate::compat::check_schema_version("addon", addon_id, &manifest.schema_version)?;
 
   update_addons_cache(addons_dir, addon_id, &manifest, &info.commit_sha)
     .with_context(|| format!("Failed to update addons cache after installing '{addon_id}'"))?;
@@ -279,6 +283,6 @@ pub fn read_cached_manifest(addons_dir: &Path, addon_id: &str) -> Result<AddonMa
       manifest_path.display()
     )
   })?;
-  serde_json::from_str(&content)
+  super::manifest::parse(&content)
     .with_context(|| format!("Failed to parse manifest for addon '{addon_id}'"))
 }

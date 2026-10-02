@@ -41,6 +41,13 @@ fn a_missing_terminal_maps_to_its_own_code() {
 }
 
 #[test]
+fn declining_a_prompt_maps_to_the_aborted_code() {
+  let err = AnesisError::Aborted;
+  assert_eq!(exit_code_for(&err.into()), exit_code::ABORTED);
+  assert_ne!(exit_code::ABORTED, exit_code::FAILURE);
+}
+
+#[test]
 fn classification_survives_being_wrapped_in_context() {
   let err = anyhow::Error::from(AnesisError::NotLoggedIn)
     .context("Failed to publish template")

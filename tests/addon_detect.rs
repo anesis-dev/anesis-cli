@@ -380,6 +380,56 @@ fn yaml_contains_value_no_match_when_different() {
 }
 
 #[test]
+fn yaml_contains_matches_a_boolean_value_by_its_string_form() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir
+    .child("config.yaml")
+    .write_str("enabled: true\n")
+    .unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "enabled".into(),
+    rules: vec![DetectRule::YamlContains {
+      file: "config.yaml".into(),
+      key_path: "enabled".into(),
+      value: Some("true".into()),
+      negate: false,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(
+    detect_variant(&detect, dir.path()),
+    Some("enabled".into()),
+    "the YAML backend's bool Display formatting must stay pinned to plain 'true'/'false'"
+  );
+}
+
+#[test]
+fn yaml_contains_matches_an_integer_value_by_its_string_form() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  dir.child("config.yaml").write_str("port: 3000\n").unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "port".into(),
+    rules: vec![DetectRule::YamlContains {
+      file: "config.yaml".into(),
+      key_path: "port".into(),
+      value: Some("3000".into()),
+      negate: false,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(
+    detect_variant(&detect, dir.path()),
+    Some("port".into()),
+    "the YAML backend's number Display formatting must stay pinned to a plain integer, \
+     with no trailing '.0' or scientific notation"
+  );
+}
+
+#[test]
 fn yaml_contains_missing_file_no_match() {
   let dir = assert_fs::TempDir::new().unwrap();
 
@@ -696,4 +746,97 @@ fn file_contains_negate_matches_when_file_missing() {
   }];
 
   assert_eq!(detect_variant(&detect, dir.path()), Some("no-match".into()));
+}
+
+#[test]
+fn file_exists_rejects_absolute_path_outside_root() {
+  let dir = assert_fs::TempDir::new().unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "leaked".into(),
+    rules: vec![DetectRule::FileExists {
+      file: "/etc/passwd".into(),
+      negate: false,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(
+    detect_variant(&detect, dir.path()),
+    None,
+    "an absolute path must never be treated as a match"
+  );
+}
+
+#[test]
+fn file_exists_rejects_parent_traversal_outside_root() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let outside = dir
+    .path()
+    .parent()
+    .unwrap()
+    .join("anesis-detect-outside.txt");
+  std::fs::write(&outside, "secret").unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "leaked".into(),
+    rules: vec![DetectRule::FileExists {
+      file: "../anesis-detect-outside.txt".into(),
+      negate: false,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  let result = detect_variant(&detect, dir.path());
+  std::fs::remove_file(&outside).ok();
+
+  assert_eq!(
+    result, None,
+    "a '..' path escaping the project root must never be treated as a match"
+  );
+}
+
+#[test]
+fn file_contains_rejects_parent_traversal_outside_root() {
+  let dir = assert_fs::TempDir::new().unwrap();
+  let outside = dir
+    .path()
+    .parent()
+    .unwrap()
+    .join("anesis-detect-secret.txt");
+  std::fs::write(&outside, "super-secret-value").unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "leaked".into(),
+    rules: vec![DetectRule::FileContains {
+      file: "../anesis-detect-secret.txt".into(),
+      contains: "super-secret-value".into(),
+      negate: false,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  let result = detect_variant(&detect, dir.path());
+  std::fs::remove_file(&outside).ok();
+
+  assert_eq!(
+    result, None,
+    "content of a file outside the project root must never be readable via detect rules"
+  );
+}
+
+#[test]
+fn file_exists_negate_does_not_flip_for_out_of_root_path() {
+  let dir = assert_fs::TempDir::new().unwrap();
+
+  let detect = vec![DetectBlock {
+    id: "negated".into(),
+    rules: vec![DetectRule::FileExists {
+      file: "/etc/passwd".into(),
+      negate: true,
+    }],
+    match_mode: MatchMode::Any,
+  }];
+
+  assert_eq!(detect_variant(&detect, dir.path()), Some("negated".into()));
 }

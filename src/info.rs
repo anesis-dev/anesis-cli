@@ -1,35 +1,33 @@
 use std::{fs, path::Path};
 
-use colored::Colorize;
-
-use crate::{auth::token::get_auth_user, context::AppContext};
+use crate::{auth::token::get_auth_user, context::AppContext, utils::ui};
 
 pub fn print_info(ctx: &AppContext) {
   println!(
     "{} {}",
-    "anesis".bold().cyan(),
-    format!("v{}", env!("CARGO_PKG_VERSION")).dimmed()
+    ui::accent_bold("anesis"),
+    ui::muted(format!("v{}", env!("CARGO_PKG_VERSION")))
   );
   println!();
 
   match get_auth_user(&ctx.paths.auth) {
     Ok(user) => println!(
       "{}  {} {}",
-      "Account:".bold(),
-      "✓".green(),
-      format!("logged in as {}", user.name).green()
+      ui::bold("Account:"),
+      ui::good(ui::symbols::ok()),
+      ui::good(format!("logged in as {}", user.name))
     ),
     Err(_) => println!(
       "{}  {} {}",
-      "Account:".bold(),
-      "✗".yellow(),
-      "not logged in (run: anesis login)".yellow()
+      ui::bold("Account:"),
+      ui::yellow(ui::symbols::err()),
+      ui::yellow("not logged in (run: anesis login)")
     ),
   }
-  println!("{}  {}", "Backend:".bold(), ctx.backend_url.dimmed());
+  println!("{}  {}", ui::bold("Backend:"), ui::muted(&ctx.backend_url));
   println!();
 
-  println!("{}", "Paths:".bold());
+  println!("{}", ui::bold("Paths:"));
   print_path("home", &ctx.paths.home);
   print_path("templates cache", &ctx.paths.templates);
   print_path("addons cache", &ctx.paths.addons);
@@ -43,9 +41,9 @@ pub fn print_info(ctx: &AppContext) {
   let addons = count_array(&ctx.paths.addons_index, "addons");
   println!(
     "{} {} template(s), {} addon(s)",
-    "Installed:".bold(),
-    templates.to_string().cyan(),
-    addons.to_string().cyan()
+    ui::bold("Installed:"),
+    ui::accent(templates.to_string()),
+    ui::accent(addons.to_string())
   );
 }
 
@@ -70,7 +68,7 @@ pub fn info_json(ctx: &AppContext) -> serde_json::Value {
 }
 
 fn print_path(label: &str, path: &Path) {
-  println!("  {:<16} {}", format!("{label}:").dimmed(), path.display());
+  ui::kv_padded(label, path.display().to_string(), 16);
 }
 
 fn count_array(path: &Path, field: &str) -> usize {

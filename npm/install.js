@@ -2,11 +2,24 @@
 "use strict";
 
 const https = require("https");
+const http = require("http");
+const tls = require("tls");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const zlib = require("zlib");
 const { spawnSync } = require("child_process");
+
+const MAX_REDIRECTS = 5;
+const SOCKET_TIMEOUT_MS = 30000;
+
+if (process.env.ANESIS_SKIP_INSTALL) {
+	console.log(
+		"anesis: ANESIS_SKIP_INSTALL is set, skipping binary download. " +
+			"Place a binary at npm/bin/anesis (or anesis.exe on Windows) yourself.",
+	);
+	process.exit(0);
+}
 
 const PLATFORM_MAP = {
 	"linux-x64": { name: "linux-x86_64", ext: "tar.gz", binary: "anesis" },
@@ -53,26 +66,126 @@ const sumsUrl = `${releaseBaseUrl}/SHA256SUMS`;
 
 console.log(`anesis: downloading ${url}`);
 
-function download(url, cb) {
-	https
-		.get(url, { headers: { "User-Agent": "anesis-npm-installer" } }, (res) => {
-			if (
-				res.statusCode >= 301 &&
-				res.statusCode <= 308 &&
-				res.headers.location
-			) {
-				return download(res.headers.location, cb);
-			}
+function getProxyUrl() {
+	const v =
+		process.env.HTTPS_PROXY ||
+		process.env.https_proxy ||
+		process.env.HTTP_PROXY ||
+		process.env.http_proxy ||
+		process.env.npm_config_https_proxy ||
+		process.env.npm_config_proxy;
+	return v ? new URL(v) : null;
+}
+
+function tunnelConnect(proxyUrl, targetHost, targetPort) {
+	return new Promise((resolve, reject) => {
+		const headers = { Host: `${targetHost}:${targetPort}` };
+		if (proxyUrl.username) {
+			const auth = `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password || "")}`;
+			headers["Proxy-Authorization"] = `Basic ${Buffer.from(auth).toString("base64")}`;
+		}
+		const req = http.request({
+			host: proxyUrl.hostname,
+			port: proxyUrl.port || 80,
+			method: "CONNECT",
+			path: `${targetHost}:${targetPort}`,
+			headers,
+			timeout: SOCKET_TIMEOUT_MS,
+		});
+		req.on("connect", (res, socket) => {
 			if (res.statusCode !== 200) {
-				cb(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+				socket.destroy();
+				reject(
+					new Error(
+						`proxy CONNECT to ${targetHost}:${targetPort} failed: HTTP ${res.statusCode}`,
+					),
+				);
 				return;
 			}
-			const chunks = [];
-			res.on("data", (c) => chunks.push(c));
-			res.on("end", () => cb(null, Buffer.concat(chunks)));
-			res.on("error", cb);
-		})
-		.on("error", cb);
+			resolve(socket);
+		});
+		req.on("timeout", () =>
+			req.destroy(
+				new Error(`proxy CONNECT to ${targetHost}:${targetPort} timed out`),
+			),
+		);
+		req.on("error", reject);
+		req.end();
+	});
+}
+
+class ProxyAgent extends https.Agent {
+	constructor(proxyUrl) {
+		super();
+		this.proxyUrl = proxyUrl;
+	}
+	createConnection(options, callback) {
+		tunnelConnect(this.proxyUrl, options.host, options.port || 443)
+			.then((socket) => {
+				const tlsSocket = tls.connect({
+					socket,
+					servername: options.servername || options.host,
+				});
+				tlsSocket.once("secureConnect", () => callback(null, tlsSocket));
+				tlsSocket.once("error", callback);
+			})
+			.catch((err) => callback(err));
+	}
+}
+
+function download(url, cb, redirectCount) {
+	redirectCount = redirectCount || 0;
+
+	let settled = false;
+	const finish = (err, buf) => {
+		if (settled) return;
+		settled = true;
+		cb(err, buf);
+	};
+
+	if (redirectCount > MAX_REDIRECTS) {
+		finish(new Error(`too many redirects downloading ${url}`));
+		return;
+	}
+
+	const target = new URL(url);
+	const proxyUrl = getProxyUrl();
+	const options = {
+		headers: { "User-Agent": "anesis-npm-installer" },
+		timeout: SOCKET_TIMEOUT_MS,
+	};
+	if (proxyUrl) {
+		options.agent = new ProxyAgent(proxyUrl);
+	}
+
+	const req = https.get(target, options, (res) => {
+		if (
+			res.statusCode >= 301 &&
+			res.statusCode <= 308 &&
+			res.headers.location
+		) {
+			res.resume();
+			download(
+				new URL(res.headers.location, target).toString(),
+				finish,
+				redirectCount + 1,
+			);
+			return;
+		}
+		if (res.statusCode !== 200) {
+			res.resume();
+			finish(new Error(`HTTP ${res.statusCode} downloading ${url}`));
+			return;
+		}
+		const chunks = [];
+		res.on("data", (c) => chunks.push(c));
+		res.on("end", () => finish(null, Buffer.concat(chunks)));
+		res.on("error", finish);
+	});
+	req.on("timeout", () =>
+		req.destroy(new Error(`request to ${url} timed out`)),
+	);
+	req.on("error", finish);
 }
 
 function extractTarGz(buf, destPath) {

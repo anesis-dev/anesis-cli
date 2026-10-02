@@ -60,6 +60,14 @@ pub enum AddonCommands {
   Remove { addon_id: String },
 
   #[command(
+    about = "Check a local addon directory for common manifest mistakes (missing copy sources, unknown requires_commands, test-fixture anchors that won't match)"
+  )]
+  Lint {
+    #[arg(help = "Path to the addon directory (defaults to the current directory)")]
+    path: Option<String>,
+  },
+
+  #[command(
     visible_alias = "p",
     about = "Publish a GitHub repository as an Anesis addon"
   )]
@@ -332,10 +340,19 @@ pub enum Commands {
 
     #[arg(
       long,
+      help = "Allow overwriting existing files in the destination directory"
+    )]
+    overwrite: bool,
+
+    #[arg(
+      long,
       value_name = "NAME=VALUE",
       help = "Provide an input value non-interactively (repeatable)"
     )]
     input: Vec<String>,
+
+    #[arg(long, help = "Show what would be generated without writing any files")]
+    dry_run: bool,
   },
 
   #[command(visible_alias = "t", about = "Manage templates")]
@@ -397,6 +414,13 @@ pub enum Commands {
       help = "Show the plan (variant, inputs, steps) without changing any files"
     )]
     dry_run: bool,
+
+    #[arg(
+      long,
+      conflicts_with = "dry_run",
+      help = "Run the command against a scratch copy of the project and show a diff, leaving the original untouched"
+    )]
+    diff: bool,
   },
 
   #[command(about = "Revert an applied addon's changes in the current project")]
@@ -423,8 +447,8 @@ pub enum Commands {
                   anesis addon republish <URL>   — refresh an addon's registry entry"
   )]
   Update {
-    #[arg(help = "Addon id to update")]
-    addon_id: String,
+    #[arg(help = "Addon id to update (omit with --all to update every outdated addon)")]
+    addon_id: Option<String>,
 
     #[arg(
       short = 'y',
@@ -432,6 +456,9 @@ pub enum Commands {
       help = "Accept all defaults, skip confirmation prompts"
     )]
     yes: bool,
+
+    #[arg(long, help = "Update every outdated addon in this project")]
+    all: bool,
   },
 
   #[command(
@@ -482,10 +509,7 @@ pub enum Commands {
     json: bool,
   },
 
-  #[command(
-    visible_alias = "doctor",
-    about = "Show CLI version, data paths and login status"
-  )]
+  #[command(about = "Show CLI version, data paths and login status")]
   Info {
     #[arg(long, help = "Output as JSON")]
     json: bool,
@@ -493,6 +517,21 @@ pub enum Commands {
 
   #[command(about = "Show this project's template and applied addons")]
   Status {
+    #[arg(long, help = "Output as JSON")]
+    json: bool,
+  },
+
+  #[command(about = "Diagnose common environment/project problems")]
+  Doctor {
+    #[arg(long, help = "Output as JSON")]
+    json: bool,
+  },
+
+  #[command(about = "Show which addon command created or modified a file")]
+  Why {
+    #[arg(help = "File path to look up (relative to the project root); omit to list all")]
+    path: Option<String>,
+
     #[arg(long, help = "Output as JSON")]
     json: bool,
   },

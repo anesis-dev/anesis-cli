@@ -8,7 +8,7 @@ use crate::{
     server::{bind_local_auth_server, serve_local_auth_server},
     token::get_auth_user,
   },
-  utils::ui::spinner,
+  utils::ui::{self, spinner},
 };
 
 pub async fn login(auth_path: &Path, backend_url: &str, frontend_url: &str) -> Result<()> {
@@ -52,7 +52,17 @@ pub async fn login(auth_path: &Path, backend_url: &str, frontend_url: &str) -> R
   let auth_json = serde_json::to_string(&user)?;
   write_auth_file(auth_path, &auth_json)?;
 
-  println!("✅ Authorization successful as @{}", user.name);
+  ui::success(format!("Authorization successful as @{}", user.name));
+
+  if std::env::var("ANESIS_TOKEN")
+    .ok()
+    .is_some_and(|t| !t.trim().is_empty())
+  {
+    ui::warn(
+      "ANESIS_TOKEN is set in your environment and takes priority over this saved session — \
+       the CLI will keep using it until you unset it.",
+    );
+  }
 
   Ok(())
 }
@@ -70,14 +80,14 @@ fn write_auth_file(path: &Path, content: &str) -> Result<()> {
   #[cfg(unix)]
   {
     use std::io::Write;
-    use std::os::unix::fs::OpenOptionsExt;
+    use std::os::unix::fs::PermissionsExt;
     let mut file = std::fs::OpenOptions::new()
       .write(true)
       .create(true)
       .truncate(true)
-      .mode(0o600)
       .open(path)?;
     file.write_all(content.as_bytes())?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
   }
   #[cfg(not(unix))]
   {

@@ -81,10 +81,15 @@ try {
     Write-Host "✓ $APP_NAME installed successfully to $destPath" -ForegroundColor Green
     Write-Host ""
 
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if ($userPath -notlike "*$INSTALL_DIR*") {
+    $userPath = (Get-Item HKCU:\Environment).GetValue('Path', '', 'DoNotExpandEnvironmentNames')
+    $pathEntries = @()
+    if ($userPath) {
+        $pathEntries = $userPath -split ';' | Where-Object { $_ -ne '' }
+    }
+    if ($pathEntries -notcontains $INSTALL_DIR) {
         Write-Host "Adding $INSTALL_DIR to PATH..." -ForegroundColor Yellow
-        [Environment]::SetEnvironmentVariable("Path", "$userPath;$INSTALL_DIR", "User")
+        $newPath = if ($userPath) { "$userPath;$INSTALL_DIR" } else { $INSTALL_DIR }
+        Set-ItemProperty -Path HKCU:\Environment -Name Path -Value $newPath -Type ExpandString
         Write-Host "✓ PATH updated. Please restart your terminal." -ForegroundColor Green
     } else {
         Write-Host "$INSTALL_DIR is already in your PATH" -ForegroundColor Green

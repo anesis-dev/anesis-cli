@@ -88,3 +88,23 @@ fn no_subdir_preserves_deep_nesting() {
   let result = strip_archive_path_for_tests(raw, None).unwrap();
   assert_eq!(result, Path::new("a/b/c/d/e.txt"));
 }
+
+#[test]
+fn strips_a_leading_dot_prefix_before_the_root_component() {
+  let raw = Path::new("./archive-root/src/main.rs");
+  let result = strip_archive_path_for_tests(raw, None).unwrap();
+  assert_eq!(
+    result,
+    Path::new("src/main.rs"),
+    "a tarball built as `tar czf out.tar.gz ./dir` prefixes every entry with \
+     './' — that must not be counted as the top-level wrapper directory, or \
+     nothing gets extracted"
+  );
+}
+
+#[test]
+fn strips_a_leading_dot_prefix_with_a_matching_subdir() {
+  let raw = Path::new("./root/templates/react/src/main.tsx");
+  let result = strip_archive_path_for_tests(raw, Some("templates/react")).unwrap();
+  assert_eq!(result, Path::new("src/main.tsx"));
+}

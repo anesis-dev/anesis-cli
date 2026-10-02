@@ -14,6 +14,12 @@ pub fn link_stack(ctx: &AppContext, source: &Path, force: bool) -> Result<Option
     .with_context(|| format!("Could not read a stack manifest at {}", source.display()))?;
 
   let dest = cached_path(ctx, &manifest.id);
+  if !dest.starts_with(&ctx.paths.stacks) {
+    anyhow::bail!(
+      "stack id '{}' would resolve outside the stacks cache directory",
+      manifest.id
+    );
+  }
   if dest.exists()
     && !force
     && !Confirm::new(&format!(

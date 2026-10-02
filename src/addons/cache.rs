@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::manifest::AddonManifest;
 use crate::utils::{
   picker::{ItemKind, PickItem},
-  ui::catalog_table,
+  ui::{self, catalog_table},
 };
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -75,6 +75,13 @@ pub fn update_addons_cache(
   manifest: &AddonManifest,
   commit_sha: &str,
 ) -> Result<()> {
+  anyhow::ensure!(
+    manifest.id == subdir,
+    "addon '{subdir}' was installed, but its manifest declares a different id ('{}'); \
+     refusing to cache it to avoid a directory/id mismatch",
+    manifest.id
+  );
+
   let mut cache = read_cache(addons_dir)?;
 
   cache.last_updated = Utc::now().to_rfc3339();
@@ -114,7 +121,7 @@ pub fn remove_addon_from_cache(addons_dir: &Path, addon_id: &str) -> Result<()> 
   cache.addons.retain(|a| a.id != addon_id);
 
   write_cache(addons_dir, &cache)?;
-  println!("✓ Removed addon '{}'", addon_id);
+  ui::success(format!("Removed addon '{addon_id}'"));
   Ok(())
 }
 

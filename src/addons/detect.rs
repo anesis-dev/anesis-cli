@@ -1,6 +1,8 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::addons::manifest::{DetectBlock, DetectRule, MatchMode};
+
+use super::steps::safe_join;
 
 pub fn detect_variant(detect: &[DetectBlock], project_root: &Path) -> Option<String> {
   for block in detect {
@@ -15,10 +17,14 @@ pub fn detect_variant(detect: &[DetectBlock], project_root: &Path) -> Option<Str
   None
 }
 
+fn resolve_in_root(project_root: &Path, file: &str) -> Option<PathBuf> {
+  safe_join(project_root, file, "detect rule path").ok()
+}
+
 fn eval_rule(rule: &DetectRule, project_root: &Path) -> bool {
   match rule {
     DetectRule::FileExists { file, negate } => {
-      let result = project_root.join(file).exists();
+      let result = resolve_in_root(project_root, file).is_some_and(|p| p.exists());
       if *negate { !result } else { result }
     }
 
@@ -27,7 +33,8 @@ fn eval_rule(rule: &DetectRule, project_root: &Path) -> bool {
       contains,
       negate,
     } => {
-      let result = std::fs::read_to_string(project_root.join(file))
+      let result = resolve_in_root(project_root, file)
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .map(|s| s.contains(contains.as_str()))
         .unwrap_or(false);
       if *negate { !result } else { result }
@@ -39,8 +46,8 @@ fn eval_rule(rule: &DetectRule, project_root: &Path) -> bool {
       value,
       negate,
     } => {
-      let result = std::fs::read_to_string(project_root.join(file))
-        .ok()
+      let result = resolve_in_root(project_root, file)
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .map(|v| traverse_json(&v, key_path, value.as_deref()))
         .unwrap_or(false);
@@ -53,8 +60,8 @@ fn eval_rule(rule: &DetectRule, project_root: &Path) -> bool {
       value,
       negate,
     } => {
-      let result = std::fs::read_to_string(project_root.join(file))
-        .ok()
+      let result = resolve_in_root(project_root, file)
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|s| toml::from_str::<toml::Value>(&s).ok())
         .map(|v| traverse_toml(&v, key_path, value.as_deref()))
         .unwrap_or(false);
@@ -67,8 +74,8 @@ fn eval_rule(rule: &DetectRule, project_root: &Path) -> bool {
       value,
       negate,
     } => {
-      let result = std::fs::read_to_string(project_root.join(file))
-        .ok()
+      let result = resolve_in_root(project_root, file)
+        .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|s| serde_yaml::from_str::<serde_yaml::Value>(&s).ok())
         .map(|v| traverse_yaml(&v, key_path, value.as_deref()))
         .unwrap_or(false);

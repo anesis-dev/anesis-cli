@@ -1,12 +1,11 @@
 use anyhow::Result;
-use colored::Colorize;
 
 use super::{
   cache::{cached_path, read_installed_stacks},
   manifest::load_stack,
   registry::fetch_stack_manifest,
 };
-use crate::context::AppContext;
+use crate::{context::AppContext, utils::ui};
 
 pub fn print_installed_stacks(ctx: &AppContext, json: bool) -> Result<()> {
   let stacks = read_installed_stacks(ctx)?;
@@ -21,9 +20,9 @@ pub fn print_installed_stacks(ctx: &AppContext, json: bool) -> Result<()> {
   for s in &stacks {
     println!(
       "{}  {} {}",
-      s.id.cyan().bold(),
+      ui::accent_bold(&s.id),
       s.name,
-      format!("({} + {} addons)", s.template, s.addons.len()).dimmed()
+      ui::muted(format!("({} + {} addons)", s.template, s.addons.len()))
     );
   }
   Ok(())
@@ -47,20 +46,22 @@ pub async fn stack_info(ctx: &AppContext, stack_id: &str, json: bool) -> Result<
   }
   println!(
     "{} {}",
-    manifest.name.bold(),
-    format!("({})", manifest.id).dimmed()
+    ui::bold(&manifest.name),
+    ui::muted(format!("({})", manifest.id))
   );
   if !manifest.description.is_empty() {
     println!("{}", manifest.description);
   }
-  println!("\n{} {}", "template:".dimmed(), manifest.template.cyan());
-  println!("{}", "addons:".dimmed());
+  println!();
+  ui::kv("template", &manifest.template);
+  println!("{}", ui::muted("addons:"));
   for a in &manifest.addons {
-    println!("  {} {}", a.id.cyan(), a.command.dimmed());
+    println!("  {} {}", ui::accent(&a.id), ui::muted(&a.command));
   }
-  println!(
-    "\nScaffold it:  {}",
-    format!("anesis new <dir> --stack {}", manifest.id).cyan()
+  println!();
+  ui::hint(
+    "Scaffold it",
+    format!("anesis new <dir> --stack {}", manifest.id),
   );
   Ok(())
 }

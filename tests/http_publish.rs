@@ -5,6 +5,7 @@ use anesis::{
   addons::{publish::publish_addon, republish::republish_addon},
   context::AppContext,
   paths::AnesisPaths,
+  stacks::publish::publish_stack,
   templates::{publish::publish, republish::republish},
   utils::errors::AnesisError,
 };
@@ -12,16 +13,7 @@ use assert_fs::TempDir;
 use reqwest::Client;
 
 fn make_ctx_without_auth(tmp: &TempDir) -> AppContext {
-  let paths = AnesisPaths {
-    home: tmp.path().to_path_buf(),
-    version_check: tmp.path().join("version_check.json"),
-    cache: tmp.path().join("cache"),
-    templates: tmp.path().join("cache/templates"),
-    auth: tmp.path().join("auth.json"),
-    addons: tmp.path().join("cache/addons"),
-    addons_index: tmp.path().join("cache/addons/anesis-addons.json"),
-    stacks: tmp.path().join("cache/stacks"),
-  };
+  let paths = AnesisPaths::under(tmp.path());
   let client = Client::builder()
     .timeout(Duration::from_secs(5))
     .build()
@@ -86,6 +78,29 @@ async fn addon_republish_fails_when_not_logged_in() {
   let err = republish_addon(&ctx, "https://github.com/owner/addon", None, None, None)
     .await
     .unwrap_err();
+  assert!(
+    err
+      .downcast_ref::<AnesisError>()
+      .is_some_and(|e| matches!(e, AnesisError::NotLoggedIn)),
+    "expected NotLoggedIn, got: {err}"
+  );
+}
+
+#[tokio::test]
+async fn stack_publish_fails_when_not_logged_in() {
+  let tmp = TempDir::new().unwrap();
+  let ctx = make_ctx_without_auth(&tmp);
+
+  let err = publish_stack(
+    &ctx,
+    "https://github.com/owner/stack",
+    false,
+    None,
+    None,
+    None,
+  )
+  .await
+  .unwrap_err();
   assert!(
     err
       .downcast_ref::<AnesisError>()

@@ -19,17 +19,7 @@ impl Fixture {
   }
 
   fn ctx(&self) -> AppContext {
-    let root = self.home.path().join(".anesis");
-    let paths = AnesisPaths {
-      home: root.clone(),
-      version_check: root.join("version_check.json"),
-      cache: root.join("cache"),
-      templates: root.join("cache").join("templates"),
-      auth: root.join("auth.json"),
-      addons: root.join("cache").join("addons"),
-      addons_index: root.join("cache").join("addons").join("anesis-addons.json"),
-      stacks: root.join("cache").join("stacks"),
-    };
+    let paths = AnesisPaths::under(self.home.path());
     paths.ensure_directories().unwrap();
 
     AppContext {

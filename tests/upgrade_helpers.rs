@@ -5,7 +5,8 @@ use chrono::{TimeZone, Utc};
 use common::{
   asset_filename_for_tests, is_cache_fresh_for_tests, is_newer_version_for_tests,
   normalize_version_tag_for_tests, parse_version_for_tests, parse_version_prerelease_for_tests,
-  release_asset_url_for_tests, release_checksums_url_for_tests, verify_asset_checksum_for_tests,
+  release_asset_url_for_tests, release_checksums_url_for_tests, upgrade_success_message_for_tests,
+  verify_asset_checksum_for_tests,
 };
 
 #[test]
@@ -68,9 +69,11 @@ fn asset_filename_uses_zip_for_windows_builds() {
   );
 }
 
+const DOWNLOAD_BASE_URL: &str = "https://github.com/anesis-dev/anesis-cli/releases/download";
+
 #[test]
 fn release_asset_url_uses_expected_github_pattern() {
-  let asset_url = release_asset_url_for_tests("1.2.3", "linux-x86_64");
+  let asset_url = release_asset_url_for_tests(DOWNLOAD_BASE_URL, "1.2.3", "linux-x86_64").unwrap();
   assert_eq!(
     asset_url,
     "https://github.com/anesis-dev/anesis-cli/releases/download/v1.2.3/anesis-linux-x86_64.tar.gz"
@@ -177,8 +180,25 @@ fn cache_is_stale_for_invalid_date_format() {
 #[test]
 fn release_checksums_url_points_at_the_tag_assets() {
   assert_eq!(
-    release_checksums_url_for_tests("1.2.3"),
+    release_checksums_url_for_tests(DOWNLOAD_BASE_URL, "1.2.3").unwrap(),
     "https://github.com/anesis-dev/anesis-cli/releases/download/v1.2.3/SHA256SUMS"
+  );
+}
+
+#[test]
+fn release_asset_url_rejects_a_plaintext_override() {
+  let asset_err =
+    release_asset_url_for_tests("http://evil.example/dl", "1.2.3", "linux-x86_64").unwrap_err();
+  let checksums_err =
+    release_checksums_url_for_tests("http://evil.example/dl", "1.2.3").unwrap_err();
+
+  assert!(
+    asset_err.to_string().contains("https"),
+    "unexpected error: {asset_err}"
+  );
+  assert!(
+    checksums_err.to_string().contains("https"),
+    "unexpected error: {checksums_err}"
   );
 }
 
@@ -218,4 +238,21 @@ fn verify_asset_checksum_picks_the_right_line_from_a_full_sums_file() {
      1111111111111111111111111111111111111111111111111111111111111111  anesis-windows-x86_64.zip\n"
   );
   assert!(verify_asset_checksum_for_tests(b"anesis", &sums, "anesis-linux-x86_64.tar.gz").is_ok());
+}
+
+#[test]
+fn upgrade_success_message_claims_completion_when_the_swap_already_happened() {
+  let message = upgrade_success_message_for_tests("1.2.3", false);
+  assert!(message.contains("updated to v1.2.3"));
+  assert!(!message.contains("background"));
+}
+
+#[test]
+fn upgrade_success_message_does_not_overclaim_when_the_swap_is_deferred() {
+  let message = upgrade_success_message_for_tests("1.2.3", true);
+  assert!(
+    message.contains("background"),
+    "a deferred Windows swap must not claim the update is already done: {message}"
+  );
+  assert!(message.contains("v1.2.3"));
 }
