@@ -119,7 +119,15 @@ pub(super) fn resolve_target(
       let canonical_root = project_root
         .canonicalize()
         .with_context(|| format!("Cannot resolve project root '{}'", project_root.display()))?;
-      let escaped_root = glob::Pattern::escape(&canonical_root.to_string_lossy());
+      let root_str = canonical_root.to_string_lossy();
+      let root_str = match root_str.strip_prefix(r"\\?\UNC\") {
+        Some(unc) => format!(r"\\{unc}"),
+        None => root_str
+          .strip_prefix(r"\\?\")
+          .unwrap_or(&root_str)
+          .to_string(),
+      };
+      let escaped_root = glob::Pattern::escape(&root_str);
       let pattern = format!("{escaped_root}/{glob}");
       let paths = glob::glob(&pattern)?
         .filter_map(|e| e.ok())
