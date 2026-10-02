@@ -1,46 +1,47 @@
 ---
 source: tests/json_output.rs
+assertion_line: 221
 expression: "cli.json(&[\"template\", \"info\", \"react-vite-ts\", \"--json\"])"
 ---
 {
+  "name": "react-vite-ts",
+  "version": "0.2.0",
   "anesisVersion": ">=1.0.0",
   "author": {
-    "github": "anesis-dev",
-    "name": "Anesis"
+    "name": "Anesis",
+    "github": "anesis-dev"
   },
-  "exclude": [],
-  "inputs": [
-    {
-      "default": "false",
-      "description": "Include React Router",
-      "name": "use_router",
-      "options": [],
-      "required": false,
-      "type": "boolean"
-    }
+  "repository": {
+    "url": "https://github.com/anesis-dev/templates"
+  },
+  "specialization": "frontend",
+  "scope": "web",
+  "technologies": [
+    "react",
+    "vite"
   ],
   "languages": [
     "typescript"
   ],
+  "type": "base",
   "metadata": {
-    "description": "A React SPA scaffolded with Vite.",
     "displayName": "React + Vite (TypeScript)",
+    "description": "A React SPA scaffolded with Vite.",
     "tags": [
       "react",
       "vite",
       "spa"
     ]
   },
-  "name": "react-vite-ts",
-  "repository": {
-    "url": "https://github.com/anesis-dev/templates"
-  },
-  "scope": "web",
-  "specialization": "frontend",
-  "technologies": [
-    "react",
-    "vite"
+  "inputs": [
+    {
+      "name": "use_router",
+      "type": "boolean",
+      "description": "Include React Router",
+      "default": "false",
+      "required": false,
+      "options": []
+    }
   ],
-  "type": "base",
-  "version": "0.2.0"
+  "exclude": []
 }

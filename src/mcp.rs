@@ -90,6 +90,16 @@ fn call_tool(params: Option<&Value>) -> Result<Value, (i64, String)> {
   }))
 }
 
+fn argv(head: &[&str], mut flags: Vec<String>, positionals: Vec<String>) -> Vec<String> {
+  let mut v: Vec<String> = head.iter().map(|s| s.to_string()).collect();
+  v.append(&mut flags);
+  if !positionals.is_empty() {
+    v.push("--".to_string());
+    v.extend(positionals);
+  }
+  v
+}
+
 fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
   let s = |k: &str| {
     args
@@ -101,13 +111,9 @@ fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
 
   match name {
     "search_registry" => {
-      let mut v = vec!["search".to_string()];
       let q = s("query");
-      if !q.is_empty() {
-        v.push(q);
-      }
-      v.push("--json".to_string());
-      Ok(v)
+      let positionals = if q.is_empty() { vec![] } else { vec![q] };
+      Ok(argv(&["search"], vec!["--json".to_string()], positionals))
     }
     "get_manifest" => {
       let kind = s("kind");
@@ -116,9 +122,11 @@ fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
         return Err("'id' is required".to_string());
       }
       match kind.as_str() {
-        "template" => Ok(vec!["template".into(), "info".into(), id, "--json".into()]),
-        "addon" => Ok(vec!["addon".into(), "info".into(), id, "--json".into()]),
-        "stack" => Ok(vec!["stack".into(), "info".into(), id, "--json".into()]),
+        "template" | "addon" | "stack" => Ok(argv(
+          &[kind.as_str(), "info"],
+          vec!["--json".to_string()],
+          vec![id],
+        )),
         other => Err(format!("Unknown kind '{other}'; use template|addon|stack")),
       }
     }
@@ -127,22 +135,23 @@ fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
       if project.is_empty() {
         return Err("'name' is required".to_string());
       }
-      let mut v = vec!["new".to_string(), project];
       let stack = s("stack");
       let template = s("template");
+      let mut flags = Vec::new();
+      let mut positionals = vec![project];
       if !stack.is_empty() {
-        v.push("--stack".into());
-        v.push(stack);
+        flags.push("--stack".to_string());
+        flags.push(stack);
       } else if !template.is_empty() {
-        v.push(template);
+        positionals.push(template);
       } else {
         return Err("Provide either 'template' or 'stack'".to_string());
       }
-      v.push("--yes".into());
-      push_overwrite(&mut v, args);
-      push_allow_run(&mut v, args);
-      push_inputs(&mut v, args);
-      Ok(v)
+      flags.push("--yes".into());
+      push_overwrite(&mut flags, args);
+      push_allow_run(&mut flags, args);
+      push_inputs(&mut flags, args);
+      Ok(argv(&["new"], flags, positionals))
     }
     "apply_addon" => {
       let id = s("addon_id");
@@ -150,10 +159,10 @@ fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
       if id.is_empty() || command.is_empty() {
         return Err("'addon_id' and 'command' are required".to_string());
       }
-      let mut v = vec!["use".to_string(), id, command, "--yes".into()];
-      push_allow_run(&mut v, args);
-      push_inputs(&mut v, args);
-      Ok(v)
+      let mut flags = vec!["--yes".to_string()];
+      push_allow_run(&mut flags, args);
+      push_inputs(&mut flags, args);
+      Ok(argv(&["use"], flags, vec![id, command]))
     }
     "apply_stack" => {
       let project = s("name");
@@ -161,17 +170,11 @@ fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
       if project.is_empty() || stack.is_empty() {
         return Err("'name' and 'stack' are required".to_string());
       }
-      let mut v = vec![
-        "new".to_string(),
-        project,
-        "--stack".into(),
-        stack,
-        "--yes".into(),
-      ];
-      push_overwrite(&mut v, args);
-      push_allow_run(&mut v, args);
-      push_inputs(&mut v, args);
-      Ok(v)
+      let mut flags = vec!["--stack".to_string(), stack, "--yes".into()];
+      push_overwrite(&mut flags, args);
+      push_allow_run(&mut flags, args);
+      push_inputs(&mut flags, args);
+      Ok(argv(&["new"], flags, vec![project]))
     }
     "project_status" => Ok(vec!["status".into(), "--json".into()]),
     "dry_run" => {
@@ -180,16 +183,16 @@ fn build_argv(name: &str, args: &Value) -> Result<Vec<String>, String> {
       if id.is_empty() || command.is_empty() {
         return Err("'addon_id' and 'command' are required".to_string());
       }
-      let mut v = vec!["use".to_string(), id, command, "--dry-run".into()];
-      push_inputs(&mut v, args);
-      Ok(v)
+      let mut flags = vec!["--dry-run".to_string()];
+      push_inputs(&mut flags, args);
+      Ok(argv(&["use"], flags, vec![id, command]))
     }
     "undo_addon" => {
       let id = s("addon_id");
       if id.is_empty() {
         return Err("'addon_id' is required".to_string());
       }
-      Ok(vec!["undo".to_string(), id, "--yes".into()])
+      Ok(argv(&["undo"], vec!["--yes".to_string()], vec![id]))
     }
     "list_outdated" => Ok(vec!["outdated".into(), "--json".into()]),
     other => Err(format!("Unknown tool '{other}'")),
@@ -203,8 +206,9 @@ pub fn build_argv_for_tests(name: &str, args: &Value) -> Result<Vec<String>, Str
 
 fn run_tool(name: &str, args: &Value) -> (String, bool) {
   let cwd = args.get("path").and_then(Value::as_str).map(String::from);
+  let allow_run = args.get("allow_run").and_then(Value::as_bool) == Some(true);
   match build_argv(name, args) {
-    Ok(mut cmd) => run_self(&mut cmd, cwd.as_deref()),
+    Ok(mut cmd) => run_self(&mut cmd, cwd.as_deref(), allow_run),
     Err(message) => (message, true),
   }
 }
@@ -234,31 +238,76 @@ fn push_inputs(cmd: &mut Vec<String>, args: &Value) {
   }
 }
 
-fn run_self(args: &mut [String], cwd: Option<&str>) -> (String, bool) {
+const TOOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+fn drain(mut pipe: impl std::io::Read + Send + 'static) -> std::thread::JoinHandle<String> {
+  std::thread::spawn(move || {
+    let mut buf = Vec::new();
+    let _ = pipe.read_to_end(&mut buf);
+    String::from_utf8_lossy(&buf).trim().to_string()
+  })
+}
+
+fn run_self(args: &mut [String], cwd: Option<&str>, allow_run: bool) -> (String, bool) {
   let exe = match std::env::current_exe() {
     Ok(exe) => exe,
     Err(e) => return (format!("cannot locate anesis binary: {e}"), true),
   };
 
   let mut cmd = Command::new(exe);
-  cmd.args(args.iter()).stdin(Stdio::null());
+  cmd
+    .args(args.iter())
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped());
+  if !allow_run {
+    cmd.env_remove("ANESIS_ALLOW_RUN");
+  }
   if let Some(dir) = cwd {
     cmd.current_dir(dir);
   }
 
-  match cmd.output() {
-    Ok(o) => {
-      let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-      let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+  let mut child = match cmd.spawn() {
+    Ok(child) => child,
+    Err(e) => return (format!("failed to run anesis: {e}"), true),
+  };
+  let stdout = child.stdout.take().map(drain);
+  let stderr = child.stderr.take().map(drain);
+
+  let deadline = std::time::Instant::now() + TOOL_TIMEOUT;
+  let status = loop {
+    match child.try_wait() {
+      Ok(Some(status)) => break Some(status),
+      Ok(None) if std::time::Instant::now() >= deadline => {
+        let _ = child.kill();
+        let _ = child.wait();
+        break None;
+      }
+      Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+      Err(e) => return (format!("failed to wait for anesis: {e}"), true),
+    }
+  };
+
+  let stdout = stdout.and_then(|h| h.join().ok()).unwrap_or_default();
+  let stderr = stderr.and_then(|h| h.join().ok()).unwrap_or_default();
+
+  match status {
+    Some(status) => {
       let text = json!({
-        "exit_code": o.status.code(),
+        "exit_code": status.code(),
         "stdout": stdout,
         "stderr": stderr
       })
       .to_string();
-      (text, !o.status.success())
+      (text, !status.success())
     }
-    Err(e) => (format!("failed to run anesis: {e}"), true),
+    None => (
+      format!(
+        "anesis did not finish within {} seconds and was stopped",
+        TOOL_TIMEOUT.as_secs()
+      ),
+      true,
+    ),
   }
 }
 

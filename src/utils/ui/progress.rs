@@ -14,7 +14,7 @@ pub fn spinner(msg: impl Into<String>) -> ProgressBar {
   pb.set_style(
     ProgressStyle::with_template("{spinner:.cyan} {msg}")
       .unwrap()
-      .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+      .tick_strings(symbols::spinner_frames()),
   );
   pb.set_message(msg.into());
   pb.enable_steady_tick(Duration::from_millis(80));
@@ -55,7 +55,7 @@ pub struct StepProgress {
 impl StepProgress {
   pub fn new() -> Self {
     Self {
-      multi: if is_quiet() || !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+      multi: if is_quiet() || !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
         None
       } else {
         Some(MultiProgress::new())
@@ -71,7 +71,7 @@ impl StepProgress {
         pb.set_style(
           ProgressStyle::with_template("{spinner:.cyan} {msg}")
             .unwrap()
-            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+            .tick_strings(symbols::spinner_frames()),
         );
         pb.set_message(format!("{prefix} {label}"));
         pb.enable_steady_tick(Duration::from_millis(80));

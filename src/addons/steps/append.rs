@@ -38,7 +38,7 @@ pub fn execute_append(step: &AppendStep, project_root: &Path, ctx: &TemplateCont
     new_content.push_str(&rendered);
 
     rollbacks.push(Rollback::restore_file(path.clone(), original));
-    if let Err(e) = std::fs::write(&path, new_content) {
+    if let Err(e) = crate::utils::atomic::write_file_atomic(&path, new_content.as_bytes()) {
       return Err(StepFailure::new(e, rollbacks));
     }
   }

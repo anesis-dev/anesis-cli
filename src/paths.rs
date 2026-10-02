@@ -50,6 +50,15 @@ impl AnesisPaths {
   }
 
   pub fn ensure_directories(&self) -> Result<()> {
+    #[cfg(unix)]
+    {
+      use std::os::unix::fs::DirBuilderExt;
+      fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&self.home)?;
+    }
+    #[cfg(not(unix))]
     fs::create_dir_all(&self.home)?;
     fs::create_dir_all(&self.cache)?;
     fs::create_dir_all(&self.templates)?;

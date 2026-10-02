@@ -102,7 +102,17 @@ pub fn execute_packages(
   non_interactive: bool,
   allow_run: bool,
 ) -> StepResult {
-  execute_packages_inner(step, project_root, non_interactive, allow_run)
+  execute_packages_in(step, project_root, non_interactive, allow_run, None)
+}
+
+pub fn execute_packages_in(
+  step: &PackagesStep,
+  project_root: &Path,
+  non_interactive: bool,
+  allow_run: bool,
+  search_path: Option<&std::ffi::OsStr>,
+) -> StepResult {
+  execute_packages_inner(step, project_root, non_interactive, allow_run, search_path)
     .map_err(StepFailure::without_rollbacks)
 }
 
@@ -111,9 +121,18 @@ fn execute_packages_inner(
   project_root: &Path,
   non_interactive: bool,
   allow_run: bool,
+  search_path: Option<&std::ffi::OsStr>,
 ) -> Result<Vec<Rollback>> {
   if step.dependencies.is_empty() && step.dev_dependencies.is_empty() {
     return Ok(Vec::new());
+  }
+  if let Some(spec) = step
+    .dependencies
+    .iter()
+    .chain(step.dev_dependencies.iter())
+    .find(|spec| spec.trim_start().starts_with('-') || spec.trim().is_empty())
+  {
+    bail!("refusing package spec '{spec}': specs must be non-empty and must not start with '-'");
   }
   let pm = detect_pm(project_root)?;
 
@@ -151,7 +170,11 @@ fn execute_packages_inner(
     }
   }
 
-  let program = which::which(pm.program()).map_err(|e| missing_pm_error(pm.program(), e))?;
+  let program = match search_path {
+    Some(paths) => which::which_in(pm.program(), Some(paths), project_root),
+    None => which::which(pm.program()),
+  }
+  .map_err(|e| missing_pm_error(pm.program(), e))?;
 
   let run = |extra: &[&str], specs: &[String]| -> Result<()> {
     let status = Command::new(&program)

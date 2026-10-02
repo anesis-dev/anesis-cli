@@ -21,9 +21,9 @@ fn parse_inputs_allows_an_empty_value() {
 }
 
 #[test]
-fn parse_inputs_allows_an_empty_name() {
-  let map = parse_inputs(&["=value".to_string()]).unwrap();
-  assert_eq!(map.get(""), Some(&"value".to_string()));
+fn parse_inputs_rejects_an_empty_name() {
+  let err = parse_inputs(&["=value".to_string()]).unwrap_err();
+  assert!(err.to_string().contains("cannot be empty"));
 }
 
 #[test]

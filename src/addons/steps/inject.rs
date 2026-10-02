@@ -109,7 +109,7 @@ pub fn execute_inject(
     if had_trailing_newline {
       new_content.push_str(line_ending);
     }
-    if let Err(e) = std::fs::write(&path, new_content) {
+    if let Err(e) = crate::utils::atomic::write_file_atomic(&path, new_content.as_bytes()) {
       return Err(StepFailure::new(e, rollbacks));
     }
   }

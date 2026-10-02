@@ -24,7 +24,7 @@ impl AnesisManifest {
     let output_path = path.join("anesis.json");
 
     let bytes = serde_json::to_vec_pretty(&self)?;
-    fs::write(&output_path, bytes)?;
+    crate::utils::atomic::write_file_atomic(&output_path, &bytes)?;
     println!("  {} {}", ui::symbols::ok(), output_path.display());
     Ok(())
   }
@@ -47,7 +47,7 @@ impl AnesisManifest {
       anesis_json.addons.push(addon_name.to_string());
       let bytes = serde_json::to_vec_pretty(&anesis_json)?;
 
-      fs::write(&path, bytes)?;
+      crate::utils::atomic::write_file_atomic(&path, &bytes)?;
     }
     Ok(())
   }
@@ -65,7 +65,7 @@ impl AnesisManifest {
     anesis_json.addons.retain(|a| a != addon_name);
     if anesis_json.addons.len() != before {
       let bytes = serde_json::to_vec_pretty(&anesis_json)?;
-      fs::write(&path, bytes)?;
+      crate::utils::atomic::write_file_atomic(&path, &bytes)?;
     }
     Ok(())
   }

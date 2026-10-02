@@ -27,7 +27,7 @@ pub fn execute_copy(
       IfExists::Skip => return Ok(rollbacks),
       IfExists::Ask => {
         if non_interactive {
-          println!("  {rendered_dest} already exists — keeping it (pass no --yes to be asked)");
+          eprintln!("  {rendered_dest} already exists — keeping it (pass no --yes to be asked)");
           return Ok(rollbacks);
         }
         let overwrite = Confirm::new(&format!("{} already exists. Overwrite?", rendered_dest))
@@ -61,7 +61,7 @@ pub fn execute_copy(
       .map_err(|e| StepFailure::new(e, rollbacks.clone()))?;
     if let Ok(text) = std::str::from_utf8(&bytes) {
       let rendered = render_string_or_fail(text, ctx, &rollbacks)?;
-      std::fs::write(&dest, rendered)
+      crate::utils::atomic::write_file_atomic(&dest, rendered.as_bytes())
         .with_context(|| format!("Failed to write {}", dest.display()))
         .map_err(|e| StepFailure::new(e, rollbacks.clone()))?;
       return Ok(rollbacks);
@@ -71,7 +71,7 @@ pub fn execute_copy(
   let bytes = std::fs::read(&src)
     .with_context(|| format!("Failed to read addon source {}", src.display()))
     .map_err(|e| StepFailure::new(e, rollbacks.clone()))?;
-  std::fs::write(&dest, bytes)
+  crate::utils::atomic::write_file_atomic(&dest, &bytes)
     .with_context(|| format!("Failed to write {}", dest.display()))
     .map_err(|e| StepFailure::new(e, rollbacks.clone()))?;
 

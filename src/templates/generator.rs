@@ -59,24 +59,34 @@ pub fn extract_template(
 
   let result = extract_dir_contents(files, output_path, &mut env, &context, ctx, excluded);
 
-  if result.is_ok() {
-    let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
-    *guard = None;
+  let task = ctx
+    .cleanup_state
+    .lock()
+    .unwrap_or_else(|e| e.into_inner())
+    .take();
+  if result.is_err()
+    && let Some(task) = task
+  {
+    crate::utils::cleanup::run_cleanup(&task);
   }
 
   result
 }
 
-pub fn parse_template_manifest(files: &[TemplateFile]) -> Option<AnesisTemplate> {
+const TEMPLATE_MANIFEST: &str = "anesis.template.json";
+
+fn is_template_manifest(file: &TemplateFile) -> bool {
+  file.path == Path::new(TEMPLATE_MANIFEST)
+}
+
+pub fn parse_template_manifest(files: &[TemplateFile]) -> Result<Option<AnesisTemplate>> {
   files
     .iter()
-    .find(|f| {
-      f.path
-        .file_name()
-        .map(|n| n == "anesis.template.json")
-        .unwrap_or(false)
+    .find(|f| is_template_manifest(f))
+    .map(|f| {
+      serde_json::from_slice(&f.contents).with_context(|| format!("Invalid {TEMPLATE_MANIFEST}"))
     })
-    .and_then(|f| serde_json::from_slice(&f.contents).ok())
+    .transpose()
 }
 
 pub fn eval_when(expr: &str, inputs: &HashMap<String, String>) -> bool {
@@ -85,7 +95,10 @@ pub fn eval_when(expr: &str, inputs: &HashMap<String, String>) -> bool {
     Some(rest) => (true, rest.trim()),
     None => (false, expr),
   };
-  let truthy = inputs.get(name).map(|v| v == "true").unwrap_or(false);
+  let truthy = inputs
+    .get(name)
+    .and_then(|v| crate::utils::validate::parse_bool(v))
+    .unwrap_or(false);
   truthy ^ negate
 }
 
@@ -114,7 +127,7 @@ fn insert_inputs(context: &mut TemplateContext, inputs: &HashMap<String, String>
 
 pub fn output_relative_path(file: &TemplateFile) -> Option<PathBuf> {
   let name = file.path.file_name()?.to_string_lossy().to_string();
-  if name == "anesis.template.json" {
+  if is_template_manifest(file) {
     return None;
   }
   match name.strip_suffix(".tera").filter(|s| !s.is_empty()) {
@@ -264,6 +277,7 @@ pub fn extract_dir_contents(
   excluded: &HashSet<PathBuf>,
 ) -> Result<()> {
   for file in files {
+    crate::utils::cleanup::check_interrupted()?;
     if is_excluded(file, excluded) {
       continue;
     }
@@ -272,7 +286,7 @@ pub fn extract_dir_contents(
       .file_name()
       .ok_or_else(|| anyhow::anyhow!("Invalid file path: {}", file.path.display()))?;
     let file_name_str = file_name.to_string_lossy();
-    if file_name_str == "anesis.template.json" {
+    if is_template_manifest(file) {
       let template: AnesisTemplate = serde_json::from_slice(&file.contents)?;
       let template_name = template.name;
       let cached_template = get_cached_template(ctx, &template_name)?.ok_or_else(|| {
@@ -284,6 +298,12 @@ pub fn extract_dir_contents(
     }
     let template_key = file.path.to_string_lossy();
 
+    if cfg!(windows) && crate::utils::archive::has_windows_unsafe_component(&file.path) {
+      return Err(anyhow!(
+        "template file '{}' has a name that is invalid on Windows",
+        file.path.display()
+      ));
+    }
     let output_path = safe_template_path(base_path, &file.path)?;
     if let Some(parent) = output_path.parent() {
       fs::create_dir_all(parent)?;
@@ -298,11 +318,27 @@ pub fn extract_dir_contents(
       let rendered = render_named(env, &template_key, template_content, context)?;
 
       fs::write(&output_path, rendered)?;
+      apply_mode(&output_path, file.mode)?;
       println!("  {} {}", ui::symbols::ok(), output_path.display());
     } else {
       fs::write(&output_path, &file.contents)?;
+      apply_mode(&output_path, file.mode)?;
       println!("  {} {}", ui::symbols::ok(), output_path.display());
     }
   }
+  Ok(())
+}
+
+#[cfg(unix)]
+fn apply_mode(path: &Path, mode: Option<u32>) -> Result<()> {
+  use std::os::unix::fs::PermissionsExt;
+  if let Some(mode) = mode {
+    fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777))?;
+  }
+  Ok(())
+}
+
+#[cfg(not(unix))]
+fn apply_mode(_path: &Path, _mode: Option<u32>) -> Result<()> {
   Ok(())
 }

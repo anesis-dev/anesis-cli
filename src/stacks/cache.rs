@@ -10,24 +10,23 @@ use super::{
   registry::fetch_stack_manifest,
 };
 use crate::context::AppContext;
-use crate::utils::ui;
+use crate::utils::{atomic::write_atomic, ui, validate::validate_registry_id};
 
-pub(crate) fn cached_path(ctx: &AppContext, stack_id: &str) -> PathBuf {
-  ctx.paths.stacks.join(format!("{stack_id}.json"))
+pub(crate) fn cached_path(ctx: &AppContext, stack_id: &str) -> Result<PathBuf> {
+  validate_registry_id("stack", stack_id)?;
+  Ok(ctx.paths.stacks.join(format!("{stack_id}.json")))
 }
 
 pub async fn install_stack(ctx: &AppContext, stack_id: &str) -> Result<StackManifest> {
+  let dest = cached_path(ctx, stack_id)?;
   let manifest = fetch_stack_manifest(ctx, stack_id).await?;
   fs::create_dir_all(&ctx.paths.stacks)?;
-  fs::write(
-    cached_path(ctx, stack_id),
-    serde_json::to_string_pretty(&manifest)?,
-  )?;
+  write_atomic(&dest, serde_json::to_string_pretty(&manifest)?.as_bytes())?;
   Ok(manifest)
 }
 
 pub fn remove_cached_stack(ctx: &AppContext, stack_id: &str) -> Result<()> {
-  let path = cached_path(ctx, stack_id);
+  let path = cached_path(ctx, stack_id)?;
   if !path.exists() {
     return Err(anyhow!("Stack '{stack_id}' is not installed locally"));
   }
@@ -57,7 +56,7 @@ pub async fn resolve_stack(ctx: &AppContext, reference: &str) -> Result<StackMan
   if let Some(path) = local_manifest_path(reference) {
     return load_stack(&path);
   }
-  let cached = cached_path(ctx, reference);
+  let cached = cached_path(ctx, reference)?;
   if cached.exists() {
     return load_stack(&cached);
   }

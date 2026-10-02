@@ -12,6 +12,30 @@ use super::steps::Rollback;
 const LOCK_FILE_NAME: &str = "anesis.lock";
 const CURRENT_SCHEMA_VERSION: u32 = 2;
 
+pub const INCOMPLETE_SUFFIX: &str = " (incomplete)";
+
+mod bytes_b64 {
+  use base64::{Engine, engine::general_purpose::STANDARD};
+  use serde::{Deserialize, Deserializer, Serializer, de::Error};
+
+  pub fn serialize<S: Serializer>(bytes: &[u8], s: S) -> Result<S::Ok, S::Error> {
+    s.serialize_str(&STANDARD.encode(bytes))
+  }
+
+  pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Repr {
+      Encoded(String),
+      Legacy(Vec<u8>),
+    }
+    match Repr::deserialize(d)? {
+      Repr::Encoded(s) => STANDARD.decode(s).map_err(D::Error::custom),
+      Repr::Legacy(bytes) => Ok(bytes),
+    }
+  }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LockFile {
   pub addons: Vec<LockEntry>,
@@ -109,7 +133,12 @@ impl LockFile {
     };
 
     let is_inside = |path: &Path| -> bool {
-      resolve_for_containment(path).is_some_and(|resolved| resolved.starts_with(&canon_root))
+      resolve_for_containment(path).is_some_and(|resolved| {
+        resolved.starts_with(&canon_root)
+          && !resolved
+            .strip_prefix(&canon_root)
+            .is_ok_and(touches_vcs_metadata)
+      })
     };
 
     for entry in &mut self.addons {
@@ -212,6 +241,7 @@ enum WireRollback {
   },
   RestoreFile {
     path: String,
+    #[serde(with = "bytes_b64")]
     original: Vec<u8>,
     #[serde(default)]
     mode: Option<u32>,
@@ -225,6 +255,43 @@ enum WireRollback {
   IrreversibleRun {
     command: String,
   },
+}
+
+pub fn secret_like_paths(journal: &[Rollback]) -> Vec<String> {
+  let mut found: Vec<String> = journal
+    .iter()
+    .filter_map(|rollback| match rollback {
+      Rollback::RestoreFile {
+        path,
+        is_symlink: false,
+        ..
+      } => path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|name| {
+          name.starts_with(".env")
+            || name == ".npmrc"
+            || name.starts_with("credentials")
+            || name.ends_with(".pem")
+            || name.ends_with(".key")
+        }),
+      _ => None,
+    })
+    .collect();
+  found.sort();
+  found.dedup();
+  found
+}
+
+fn touches_vcs_metadata(relative: &Path) -> bool {
+  relative.components().any(|c| {
+    matches!(
+      c,
+      std::path::Component::Normal(name)
+        if [".git", ".hg", ".svn"].iter().any(|vcs| name.eq_ignore_ascii_case(vcs))
+    )
+  })
 }
 
 fn resolve_for_containment(path: &Path) -> Option<PathBuf> {

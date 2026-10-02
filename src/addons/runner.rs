@@ -14,15 +14,19 @@ use crate::{
   manifest::AnesisManifest,
   templates::generator::{to_camel_case, to_kebab_case, to_pascal_case, to_snake_case},
   utils::{
+    cleanup::interrupted,
+    errors::AnesisError,
     picker::{ItemKind, PickItem, pick_one},
+    suggest::suggest,
     ui::{self, spinner},
+    validate::parse_bool,
   },
 };
 
 use super::{
   detect::detect_variant,
   install::{fetch_latest_version, install_addon, read_cached_manifest, record_addon_use},
-  lock::{LockEntry, LockFile},
+  lock::{INCOMPLETE_SUFFIX, LockEntry, LockFile, secret_like_paths},
   manifest::{AddonCommand, InputDef, InputType},
   steps::{
     Rollback, append::execute_append, copy::execute_copy, create::execute_create,
@@ -42,7 +46,7 @@ fn eval_step_when(expr: &str, inputs: &HashMap<String, String>) -> Result<bool> 
   let value = inputs
     .get(name)
     .ok_or_else(|| anyhow!("step 'when' references unknown input '{name}'"))?;
-  Ok((value == "true") ^ negate)
+  Ok(parse_bool(value).unwrap_or(false) ^ negate)
 }
 
 fn effective_steps(steps: &[StepEntry], inputs: &HashMap<String, String>) -> Result<Vec<Step>> {
@@ -70,6 +74,112 @@ impl Drop for ClearCleanupOnDrop<'_> {
     let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
     *guard = None;
   }
+}
+
+struct CommandRecord<'a> {
+  addon_id: &'a str,
+  version: &'a str,
+  variant: &'a str,
+  inputs: &'a HashMap<String, String>,
+  cmd_inputs: &'a HashMap<String, String>,
+}
+
+impl CommandRecord<'_> {
+  fn apply(&self, lock: &mut LockFile, command_name: &str, journal: Vec<Rollback>) {
+    if let Some(existing) = lock.addons.iter_mut().find(|e| e.id == self.addon_id) {
+      existing.version = self.version.to_string();
+      existing.variant = self.variant.to_string();
+      existing.inputs = self.inputs.clone();
+      existing.upsert_command(command_name, self.cmd_inputs.clone(), journal);
+    } else {
+      let mut entry = LockEntry::new(self.addon_id, self.version, self.variant);
+      entry.inputs = self.inputs.clone();
+      entry.upsert_command(command_name, self.cmd_inputs.clone(), journal);
+      lock.addons.push(entry);
+    }
+  }
+}
+
+fn rollback_and_report(journal: &Mutex<Vec<Rollback>>, project_root: &Path) -> Vec<Rollback> {
+  let entries = take_journal(journal);
+  let total = entries.len();
+  let mut leftover = Vec::new();
+  let mut failures = Vec::new();
+  for rollback in entries.into_iter().rev() {
+    if let Err(err) = apply_rollback(rollback.clone(), project_root) {
+      failures.push(format!("{}: {err:#}", describe_rollback(&rollback)));
+      leftover.push(rollback);
+    }
+  }
+  leftover.reverse();
+  if failures.is_empty() {
+    println!("Rolled back all changes made by this command.");
+  } else {
+    for failure in &failures {
+      ui::failure(failure);
+    }
+    ui::warn_err(format!(
+      "Rolled back {} of {total} change(s); the ones listed above could not be reverted.",
+      total - failures.len()
+    ));
+  }
+  leftover
+}
+
+fn keep_in_lock(
+  lock: &mut LockFile,
+  record: &CommandRecord,
+  command_name: &str,
+  journal: Vec<Rollback>,
+  project_root: &Path,
+) {
+  if journal.is_empty() {
+    return;
+  }
+  record.apply(lock, &format!("{command_name}{INCOMPLETE_SUFFIX}"), journal);
+  match lock.save(project_root) {
+    Ok(()) => {
+      if let Err(err) = AnesisManifest::add_addon(record.addon_id, project_root) {
+        eprintln!("Note: could not update anesis.json ({err}).");
+      }
+      ui::warn_err(format!(
+        "The remaining changes were recorded in anesis.lock; run `anesis undo {}` to revert them.",
+        record.addon_id
+      ));
+    }
+    Err(err) => ui::failure(format!("Could not record the remaining changes: {err:#}")),
+  }
+}
+
+pub fn reject_unknown_inputs<'a>(
+  presets: &HashMap<String, String>,
+  declared: impl Iterator<Item = &'a str>,
+) -> Result<()> {
+  let declared: Vec<&str> = declared.collect();
+  let mut unknown: Vec<&String> = presets
+    .keys()
+    .filter(|name| !declared.contains(&name.as_str()))
+    .collect();
+  if unknown.is_empty() {
+    return Ok(());
+  }
+  unknown.sort();
+  let described: Vec<String> = unknown
+    .iter()
+    .map(|name| match suggest(name, &declared) {
+      Some(close) => format!("'{name}' (did you mean '{close}'?)"),
+      None => format!("'{name}'"),
+    })
+    .collect();
+  let known = if declared.is_empty() {
+    "none".to_string()
+  } else {
+    declared.join(", ")
+  };
+  Err(anyhow!(
+    "Unknown input(s): {}. Declared inputs: {known}.",
+    described.join(", ")
+  ))
 }
 
 pub async fn run_addon_command(
@@ -177,6 +287,15 @@ pub async fn run_addon_command(
     }
   }
 
+  reject_unknown_inputs(
+    presets,
+    manifest
+      .inputs
+      .iter()
+      .chain(command.inputs.iter())
+      .map(|i| i.name.as_str()),
+  )?;
+
   let mut template_ctx = TemplateContext::new();
 
   let mut input_values: HashMap<String, String> = HashMap::new();
@@ -234,8 +353,23 @@ pub async fn run_addon_command(
   }
   let _cleanup_guard = ClearCleanupOnDrop(&ctx.cleanup_state);
 
+  let variant_id = detected_id.unwrap_or_else(|| "universal".to_string());
+  let record = CommandRecord {
+    addon_id,
+    version: &manifest.version,
+    variant: &variant_id,
+    inputs: &input_values,
+    cmd_inputs: &cmd_input_values,
+  };
+
   let step_progress = ui::StepProgress::new();
   for (idx, step) in steps.iter().enumerate() {
+    if interrupted() {
+      let leftover = rollback_and_report(&journal, project_root);
+      keep_in_lock(&mut lock, &record, command_name, leftover, project_root);
+      return Err(AnesisError::Interrupted.into());
+    }
+
     let label = step_label(step);
     let handle = step_progress.start_step(idx, total, &label);
 
@@ -274,6 +408,12 @@ pub async fn run_addon_command(
           .unwrap_or_else(|e| e.into_inner())
           .extend(failure.rollbacks);
 
+        if interrupted() {
+          let leftover = rollback_and_report(&journal, project_root);
+          keep_in_lock(&mut lock, &record, command_name, leftover, project_root);
+          return Err(AnesisError::Interrupted.into());
+        }
+
         let err = failure
           .error
           .context(format!("step {} ({}) failed", idx + 1, label));
@@ -285,53 +425,46 @@ pub async fn run_addon_command(
             "How would you like to proceed?",
             vec!["Keep changes made so far", "Rollback all changes"],
           )
-          .prompt()?
+          .prompt()
+          .unwrap_or("Rollback all changes")
         };
 
-        if choice == "Rollback all changes" {
-          for rollback in take_journal(&journal).into_iter().rev() {
-            let _ = apply_rollback(rollback, project_root);
-          }
-          println!("Rolled back all changes made by this command.");
-        }
+        let kept = if choice == "Rollback all changes" {
+          rollback_and_report(&journal, project_root)
+        } else {
+          take_journal(&journal)
+        };
+        keep_in_lock(&mut lock, &record, command_name, kept, project_root);
 
         return Err(err);
       }
     }
   }
 
+  if interrupted() {
+    let leftover = rollback_and_report(&journal, project_root);
+    keep_in_lock(&mut lock, &record, command_name, leftover, project_root);
+    return Err(AnesisError::Interrupted.into());
+  }
+
   let completed_rollbacks = journal.lock().unwrap_or_else(|e| e.into_inner()).clone();
 
-  let variant_id = detected_id.unwrap_or_else(|| "universal".to_string());
-  if let Some(existing) = lock.addons.iter_mut().find(|e| e.id == addon_id) {
-    existing.version = manifest.version.clone();
-    existing.variant = variant_id;
-    existing.inputs = input_values.clone();
-    existing.upsert_command(
-      command_name,
-      cmd_input_values.clone(),
-      completed_rollbacks.clone(),
-    );
-  } else {
-    let mut entry = LockEntry::new(addon_id, manifest.version.clone(), variant_id);
-    entry.inputs = input_values.clone();
-    entry.upsert_command(
-      command_name,
-      cmd_input_values.clone(),
-      completed_rollbacks.clone(),
-    );
-    lock.addons.push(entry);
-  }
+  record.apply(&mut lock, command_name, completed_rollbacks.clone());
 
   if let Err(err) = lock.save(project_root) {
     ui::failure(format!(
       "Failed to save the rollback journal ({err:#}); rolling back this command's changes."
     ));
-    for rollback in take_journal(&journal).into_iter().rev() {
-      let _ = apply_rollback(rollback, project_root);
-    }
-    println!("Rolled back all changes made by this command.");
+    rollback_and_report(&journal, project_root);
     return Err(err.context("Failed to save anesis.lock"));
+  }
+
+  let secrets = secret_like_paths(&completed_rollbacks);
+  if !secrets.is_empty() {
+    ui::warn_err(format!(
+      "anesis.lock stores the previous contents of {}; do not commit it if those files hold secrets.",
+      secrets.join(", ")
+    ));
   }
 
   take_journal(&journal);
@@ -455,14 +588,29 @@ pub(crate) fn step_label(step: &Step) -> String {
     }
   }
   let raw = match step {
-    Step::Copy(s) => format!("copy '{}' → '{}'", s.src, s.dest),
+    Step::Copy(s) => format!(
+      "copy '{}' {} '{}'",
+      s.src,
+      crate::utils::ui::symbols::arrow(),
+      s.dest
+    ),
     Step::Create(s) => format!("create '{}'", s.path),
     Step::Inject(s) => format!("inject into '{}'", target(&s.target)),
     Step::Replace(s) => format!("replace in '{}'", target(&s.target)),
     Step::Append(s) => format!("append to '{}'", target(&s.target)),
     Step::Delete(s) => format!("delete '{}'", target(&s.target)),
-    Step::Rename(s) => format!("rename '{}' → '{}'", s.from, s.to),
-    Step::Move(s) => format!("move '{}' → '{}'", s.from, s.to),
+    Step::Rename(s) => format!(
+      "rename '{}' {} '{}'",
+      s.from,
+      crate::utils::ui::symbols::arrow(),
+      s.to
+    ),
+    Step::Move(s) => format!(
+      "move '{}' {} '{}'",
+      s.from,
+      crate::utils::ui::symbols::arrow(),
+      s.to
+    ),
     Step::Packages(s) => format!(
       "install {} package(s)",
       s.dependencies.len() + s.dev_dependencies.len()
@@ -612,6 +760,25 @@ pub fn rerun_prompt_message_for_tests(
   rerun_prompt_message(command_name, locked_version, current_version)
 }
 
+fn validate_preset(input: &InputDef, value: &str) -> Result<String> {
+  match input.input_type {
+    InputType::Boolean => parse_bool(value).map(|b| b.to_string()).ok_or_else(|| {
+      anyhow!(
+        "Invalid value '{value}' for boolean input '{}'; use true or false.",
+        input.name
+      )
+    }),
+    InputType::Select if !input.options.is_empty() && !input.options.iter().any(|o| o == value) => {
+      Err(anyhow!(
+        "Invalid value '{value}' for input '{}'; allowed values: {}.",
+        input.name,
+        input.options.join(", ")
+      ))
+    }
+    _ => Ok(value.to_string()),
+  }
+}
+
 pub fn collect_inputs(
   inputs: &[InputDef],
   presets: &HashMap<String, String>,
@@ -621,13 +788,17 @@ pub fn collect_inputs(
   let mut missing: Vec<&str> = Vec::new();
   for input in inputs {
     if let Some(preset) = presets.get(&input.name) {
-      map.insert(input.name.clone(), preset.clone());
+      map.insert(input.name.clone(), validate_preset(input, preset)?);
       continue;
     }
     if non_interactive {
       match &input.default {
         Some(default) => {
-          map.insert(input.name.clone(), default.clone());
+          let default = match input.input_type {
+            InputType::Boolean => parse_bool(default).unwrap_or(false).to_string(),
+            _ => default.clone(),
+          };
+          map.insert(input.name.clone(), default);
         }
         None if input.required => missing.push(&input.name),
         None => {
@@ -657,7 +828,7 @@ pub fn collect_inputs(
         let default = input
           .default
           .as_deref()
-          .map(|d| d == "true")
+          .and_then(parse_bool)
           .unwrap_or(false);
         Confirm::new(&input.description)
           .with_default(default)
@@ -828,25 +999,30 @@ pub struct OutdatedEntry {
 pub async fn collect_outdated(ctx: &AppContext, project_root: &Path) -> Result<Vec<OutdatedEntry>> {
   let lock = LockFile::load(project_root)?;
 
-  let mut entries = Vec::with_capacity(lock.addons.len());
-  for entry in &lock.addons {
-    entries.push(match fetch_latest_version(ctx, &entry.id).await {
-      Ok(latest) => OutdatedEntry {
-        id: entry.id.clone(),
-        current: entry.version.clone(),
-        outdated: is_newer(&latest, &entry.version),
-        latest: Some(latest),
-        error: None,
-      },
-      Err(err) => OutdatedEntry {
-        id: entry.id.clone(),
-        current: entry.version.clone(),
-        latest: None,
-        outdated: false,
-        error: Some(format!("{err:#}")),
-      },
-    });
-  }
+  use futures::StreamExt;
+
+  let entries = futures::stream::iter(lock.addons.iter())
+    .map(|entry| async move {
+      match fetch_latest_version(ctx, &entry.id).await {
+        Ok(latest) => OutdatedEntry {
+          id: entry.id.clone(),
+          current: entry.version.clone(),
+          outdated: is_newer(&latest, &entry.version),
+          latest: Some(latest),
+          error: None,
+        },
+        Err(err) => OutdatedEntry {
+          id: entry.id.clone(),
+          current: entry.version.clone(),
+          latest: None,
+          outdated: false,
+          error: Some(format!("{err:#}")),
+        },
+      }
+    })
+    .buffered(8)
+    .collect::<Vec<_>>()
+    .await;
   Ok(entries)
 }
 
@@ -895,13 +1071,153 @@ pub async fn outdated(ctx: &AppContext, project_root: &Path, json: bool) -> Resu
   Ok(())
 }
 
+enum FileState {
+  Absent,
+  File { bytes: Vec<u8>, mode: Option<u32> },
+  Symlink(std::path::PathBuf),
+}
+
+struct Snapshot {
+  path: std::path::PathBuf,
+  state: FileState,
+}
+
+impl Snapshot {
+  fn capture(path: &Path) -> Self {
+    let state = match path.symlink_metadata() {
+      Ok(meta) if meta.file_type().is_symlink() => fs::read_link(path)
+        .map(FileState::Symlink)
+        .unwrap_or(FileState::Absent),
+      Ok(meta) if meta.is_file() => match fs::read(path) {
+        Ok(bytes) => {
+          #[cfg(unix)]
+          let mode = {
+            use std::os::unix::fs::PermissionsExt;
+            Some(meta.permissions().mode() & 0o777)
+          };
+          #[cfg(not(unix))]
+          let mode = None;
+          FileState::File { bytes, mode }
+        }
+        Err(_) => FileState::Absent,
+      },
+      _ => FileState::Absent,
+    };
+    Self {
+      path: path.to_path_buf(),
+      state,
+    }
+  }
+
+  fn restore(&self) -> Result<()> {
+    if let Ok(meta) = self.path.symlink_metadata()
+      && !meta.is_dir()
+    {
+      fs::remove_file(&self.path)?;
+    }
+    match &self.state {
+      FileState::Absent => {}
+      FileState::File { bytes, mode } => {
+        if let Some(parent) = self.path.parent() {
+          fs::create_dir_all(parent)?;
+        }
+        fs::write(&self.path, bytes)?;
+        #[cfg(unix)]
+        if let Some(mode) = mode {
+          use std::os::unix::fs::PermissionsExt;
+          fs::set_permissions(&self.path, fs::Permissions::from_mode(*mode))?;
+        }
+        #[cfg(not(unix))]
+        let _ = mode;
+      }
+      FileState::Symlink(target) => {
+        if let Some(parent) = self.path.parent() {
+          fs::create_dir_all(parent)?;
+        }
+        restore_symlink(target, &self.path)?;
+      }
+    }
+    Ok(())
+  }
+}
+
+fn snapshot_entry(entry: &LockEntry) -> Vec<Snapshot> {
+  let mut paths: Vec<&Path> = Vec::new();
+  for rollback in entry.commands.iter().flat_map(|c| c.journal.iter()) {
+    match rollback {
+      Rollback::DeleteCreatedFile { path } | Rollback::RestoreFile { path, .. } => paths.push(path),
+      Rollback::RenameFile { from, to } => {
+        paths.push(from);
+        paths.push(to);
+      }
+      Rollback::IrreversibleRun { .. } => {}
+    }
+  }
+  paths.sort();
+  paths.dedup();
+  paths.into_iter().map(Snapshot::capture).collect()
+}
+
+fn restore_previous_version(
+  addon_id: &str,
+  project_root: &Path,
+  previous: &LockEntry,
+  snapshots: &[Snapshot],
+) {
+  let partially_applied = LockFile::load(project_root)
+    .map(|lock| {
+      lock
+        .addons
+        .iter()
+        .any(|e| e.id == addon_id && e.has_undoable_changes())
+    })
+    .unwrap_or(false);
+  if partially_applied && let Err(err) = undo_addon(addon_id, project_root, true) {
+    ui::failure(format!("{err:#}"));
+  }
+
+  for snapshot in snapshots {
+    if let Err(err) = snapshot.restore() {
+      ui::failure(format!(
+        "could not restore '{}': {err:#}",
+        snapshot.path.display()
+      ));
+    }
+  }
+
+  let saved = LockFile::load(project_root).and_then(|mut lock| {
+    lock.upsert_entry(previous.clone());
+    lock.save(project_root)
+  });
+  if let Err(err) = saved {
+    ui::failure(format!(
+      "could not restore the previous anesis.lock entry: {err:#}"
+    ));
+  }
+  let _ = AnesisManifest::add_addon(addon_id, project_root);
+}
+
+fn all_declared_inputs(manifest: &super::manifest::AddonManifest) -> Vec<&str> {
+  manifest
+    .inputs
+    .iter()
+    .chain(
+      manifest
+        .variants
+        .iter()
+        .flat_map(|v| v.commands.iter().flat_map(|c| c.inputs.iter())),
+    )
+    .map(|i| i.name.as_str())
+    .collect()
+}
+
 pub async fn update_addon(
   ctx: &AppContext,
   addon_id: &str,
   project_root: &Path,
   non_interactive: bool,
 ) -> Result<()> {
-  let (current, entry_inputs, command_runs, had_journal) = {
+  let (current, entry_inputs, command_runs, previous) = {
     let lock = LockFile::load(project_root)?;
     let entry = lock
       .addons
@@ -914,9 +1230,10 @@ pub async fn update_addon(
       entry
         .commands
         .iter()
+        .filter(|c| !c.name.ends_with(INCOMPLETE_SUFFIX))
         .map(|c| (c.name.clone(), c.inputs.clone()))
         .collect::<Vec<_>>(),
-      entry.has_undoable_changes(),
+      entry.clone(),
     )
   };
 
@@ -926,7 +1243,10 @@ pub async fn update_addon(
     return Ok(());
   }
 
-  println!("Updating '{addon_id}' v{current} → v{latest}...");
+  println!(
+    "Updating '{addon_id}' v{current} {} v{latest}...",
+    ui::symbols::arrow()
+  );
 
   install_addon(ctx, addon_id).await.with_context(|| {
     format!(
@@ -949,34 +1269,53 @@ pub async fn update_addon(
     )
   })?;
 
-  if had_journal {
-    undo_addon(addon_id, project_root, true)?;
-  } else {
-    let mut lock = LockFile::load(project_root)?;
-    lock.remove_addon(addon_id);
-    lock.save(project_root)?;
-    let _ = AnesisManifest::remove_addon(addon_id, project_root);
+  if !non_interactive {
+    ui::warn(format!(
+      "Updating '{addon_id}' reverts v{current} and re-applies {} command(s) of v{latest}.",
+      command_runs.len()
+    ));
+    println!(
+      "  Addons run unsandboxed and can overwrite source files or 'package.json'. \
+       Only run addons you trust."
+    );
+    if !Confirm::new("Proceed?").with_default(false).prompt()? {
+      return Err(AnesisError::Aborted.into());
+    }
   }
 
-  for (cmd, inputs) in &command_runs {
-    run_addon_command(
-      ctx,
-      addon_id,
-      cmd,
-      project_root,
-      inputs,
-      non_interactive,
-      false,
-    )
-    .await
-    .with_context(|| {
-      format!(
-        "addon '{addon_id}' was updated to v{latest} and its old files were reverted, but \
-         re-applying command '{cmd}' failed; commands before it in this list were re-applied \
-         successfully — fix the issue above, then run `anesis use {addon_id} <command>` for \
-         any that still need it"
-      )
-    })?;
+  let snapshots = snapshot_entry(&previous);
+  let declared: Vec<String> = all_declared_inputs(&new_manifest)
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+
+  let reapplied: Result<()> = async {
+    if previous.has_undoable_changes() {
+      undo_addon(addon_id, project_root, true)?;
+    } else {
+      let mut lock = LockFile::load(project_root)?;
+      lock.remove_addon(addon_id);
+      lock.save(project_root)?;
+      let _ = AnesisManifest::remove_addon(addon_id, project_root);
+    }
+
+    for (cmd, cmd_inputs) in &command_runs {
+      let mut presets = entry_inputs.clone();
+      presets.extend(cmd_inputs.clone());
+      presets.retain(|name, _| declared.contains(name));
+      run_addon_command(ctx, addon_id, cmd, project_root, &presets, true, false)
+        .await
+        .with_context(|| format!("re-applying command '{cmd}' failed"))?;
+    }
+    Ok(())
+  }
+  .await;
+
+  if let Err(err) = reapplied {
+    restore_previous_version(addon_id, project_root, &previous, &snapshots);
+    return Err(err.context(format!(
+      "updating '{addon_id}' to v{latest} failed; the previous v{current} was restored"
+    )));
   }
 
   ui::success(format!("Updated '{addon_id}' to v{latest}."));
@@ -1052,6 +1391,16 @@ fn undo_conflicts(tagged: &[(usize, Rollback)]) -> Vec<String> {
       Rollback::DeleteCreatedFile { path } if !path.exists() => {
         conflicts.push(format!("{} (already deleted)", path.display()));
       }
+      Rollback::RestoreFile {
+        path,
+        is_symlink: true,
+        ..
+      } if path.symlink_metadata().is_ok() => {
+        conflicts.push(format!(
+          "{} (something already exists here)",
+          path.display()
+        ));
+      }
       Rollback::RestoreFile { path, .. } if !path.exists() => {
         conflicts.push(format!("{} (missing)", path.display()));
       }
@@ -1080,15 +1429,33 @@ fn describe_rollback(rollback: &Rollback) -> String {
   }
 }
 
+fn ensure_symlink_slot_free(path: &Path) -> Result<()> {
+  if path.symlink_metadata().is_ok() {
+    return Err(anyhow!(
+      "cannot restore the symlink '{}': something already exists at that path; \
+       move or remove it and run the command again",
+      path.display()
+    ));
+  }
+  Ok(())
+}
+
 #[cfg(unix)]
 fn restore_symlink(target: &Path, path: &Path) -> Result<()> {
+  ensure_symlink_slot_free(path)?;
   std::os::unix::fs::symlink(target, path)?;
   Ok(())
 }
 
 #[cfg(windows)]
 fn restore_symlink(target: &Path, path: &Path) -> Result<()> {
-  std::os::windows::fs::symlink_file(target, path)?;
+  ensure_symlink_slot_free(path)?;
+  let resolved = path.parent().map(|p| p.join(target));
+  if resolved.as_deref().unwrap_or(target).is_dir() {
+    std::os::windows::fs::symlink_dir(target, path)?;
+  } else {
+    std::os::windows::fs::symlink_file(target, path)?;
+  }
   Ok(())
 }
 
@@ -1119,7 +1486,7 @@ pub fn apply_rollback(rollback: Rollback, project_root: &Path) -> Result<()> {
         #[cfg(unix)]
         if let Some(mode) = _mode {
           use std::os::unix::fs::PermissionsExt;
-          std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))?;
+          std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode & 0o777))?;
         }
       }
     }

@@ -27,7 +27,7 @@ fn execute_run_inner(
   non_interactive: bool,
   allow_run: bool,
 ) -> Result<Vec<Rollback>> {
-  let command = super::render_string(&step.command, ctx)?;
+  let command = crate::utils::template_engine::render_shell_string(&step.command, ctx)?;
 
   if !step.description.is_empty() {
     println!(

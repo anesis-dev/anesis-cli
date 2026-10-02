@@ -1,11 +1,12 @@
 ---
 source: tests/json_output.rs
+assertion_line: 246
 expression: "cli.json(&[\"status\", \"--json\"])"
 ---
 {
-  "addons": [],
   "template": {
     "name": "react-vite-ts",
     "sha": "0123456789abcdef0123456789abcdef01234567"
-  }
+  },
+  "addons": []
 }

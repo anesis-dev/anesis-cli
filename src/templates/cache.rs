@@ -48,14 +48,26 @@ impl CachedTemplate {
   }
 }
 
+fn parse_index(path: &Path) -> Result<TemplatesCache> {
+  let content = fs::read_to_string(path)?;
+  serde_json::from_str(&content).with_context(|| {
+    format!(
+      "The template index '{}' is corrupt; delete it and re-run `anesis template install <name>` to rebuild it",
+      path.display()
+    )
+  })
+}
+
+fn save_index(path: &Path, cache: &TemplatesCache) -> Result<()> {
+  crate::utils::atomic::write_atomic(path, serde_json::to_string_pretty(cache)?.as_bytes())
+}
+
 pub fn read_installed_templates(template_path: &Path) -> Result<Vec<CachedTemplate>> {
   let templates_json = template_path.join("anesis-templates.json");
   if !templates_json.exists() {
     return Ok(Vec::new());
   }
-  let content = fs::read_to_string(&templates_json)?;
-  let cache: TemplatesCache = serde_json::from_str(&content)?;
-  Ok(cache.templates)
+  Ok(parse_index(&templates_json)?.templates)
 }
 
 pub fn update_templates_cache(
@@ -79,36 +91,34 @@ pub fn update_templates_cache(
   );
 
   let templates_json = template_path.join("anesis-templates.json");
-  let mut templates_info: TemplatesCache = if templates_json.exists() {
-    let content = fs::read_to_string(&templates_json)?;
-    serde_json::from_str(&content)?
-  } else {
-    TemplatesCache {
-      last_updated: Utc::now().to_rfc3339(),
-      templates: Vec::new(),
-    }
-  };
+  crate::utils::atomic::with_file_lock(&templates_json, || {
+    let mut templates_info: TemplatesCache = if templates_json.exists() {
+      parse_index(&templates_json)?
+    } else {
+      TemplatesCache {
+        last_updated: Utc::now().to_rfc3339(),
+        templates: Vec::new(),
+      }
+    };
 
-  templates_info.last_updated = Utc::now().to_rfc3339();
+    templates_info.last_updated = Utc::now().to_rfc3339();
 
-  templates_info
-    .templates
-    .retain(|t| t.name != template_info.name);
-  let cached_template = CachedTemplate {
-    name: template_info.name,
-    version: template_info.version,
-    source: template_info.repository.url,
-    path: path.to_string_lossy().to_string(),
-    commit_sha: commit_sha.to_string(),
-  };
-  templates_info.templates.push(cached_template.clone());
+    templates_info
+      .templates
+      .retain(|t| t.name != template_info.name);
+    let cached_template = CachedTemplate {
+      name: template_info.name,
+      version: template_info.version,
+      source: template_info.repository.url,
+      path: path.to_string_lossy().to_string(),
+      commit_sha: commit_sha.to_string(),
+    };
+    templates_info.templates.push(cached_template.clone());
 
-  fs::write(
-    &templates_json,
-    serde_json::to_string_pretty(&templates_info)?,
-  )?;
+    save_index(&templates_json, &templates_info)?;
 
-  Ok(cached_template)
+    Ok(cached_template)
+  })
 }
 
 pub fn get_cached_template(ctx: &AppContext, name: &str) -> Result<Option<CachedTemplate>> {
@@ -118,11 +128,8 @@ pub fn get_cached_template(ctx: &AppContext, name: &str) -> Result<Option<Cached
     return Ok(None);
   }
 
-  let content = fs::read_to_string(&templates_json)?;
-  let templates_info: TemplatesCache = serde_json::from_str(&content)?;
-
   Ok(
-    templates_info
+    parse_index(&templates_json)?
       .templates
       .into_iter()
       .find(|t| t.name == name),
@@ -139,8 +146,15 @@ pub fn remove_template_from_cache(template_path: &Path, template_name: &str) -> 
     ));
   }
 
-  let content = fs::read_to_string(&templates_json)?;
-  let mut templates_info: TemplatesCache = serde_json::from_str(&content)?;
+  crate::utils::atomic::with_file_lock(&templates_json, || {
+    remove_locked(template_path, template_name, &templates_json)
+  })?;
+  ui::success(format!("Removed template '{template_name}'"));
+  Ok(())
+}
+
+fn remove_locked(template_path: &Path, template_name: &str, templates_json: &Path) -> Result<()> {
+  let mut templates_info = parse_index(templates_json)?;
 
   let exists = templates_info
     .templates
@@ -182,21 +196,14 @@ pub fn remove_template_from_cache(template_path: &Path, template_name: &str) -> 
     .templates
     .retain(|template| template.name != template_name);
 
-  fs::write(
-    &templates_json,
-    serde_json::to_string_pretty(&templates_info)?,
-  )?;
-
-  ui::success(format!("Removed template '{template_name}'"));
-  Ok(())
+  save_index(templates_json, &templates_info)
 }
 
 pub fn get_installed_templates(template_path: &Path) -> Result<()> {
   let templates_json = template_path.join("anesis-templates.json");
 
   let templates_info: TemplatesCache = if templates_json.exists() {
-    let content = fs::read_to_string(&templates_json)?;
-    serde_json::from_str(&content)?
+    parse_index(&templates_json)?
   } else {
     TemplatesCache {
       last_updated: Utc::now().to_rfc3339(),

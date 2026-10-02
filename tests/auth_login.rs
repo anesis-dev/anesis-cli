@@ -52,9 +52,10 @@ fn write_auth_file_fails_when_parent_dir_missing() {
   let path = dir.path().join("nonexistent").join("auth.json");
 
   let err = write_auth_file_for_tests(&path, "{}").unwrap_err();
+  let message = format!("{err:#}");
   assert!(
-    err.to_string().contains("No such file") || err.to_string().contains("os error"),
-    "expected I/O error, got: {err}"
+    message.contains("No such file") || message.contains("os error"),
+    "expected I/O error, got: {message}"
   );
 }
 

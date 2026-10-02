@@ -203,8 +203,9 @@ fn build_argv_search_registry_with_a_query() {
     argv,
     vec![
       "search".to_string(),
+      "--json".to_string(),
+      "--".to_string(),
       "docker".to_string(),
-      "--json".to_string()
     ]
   );
 }
@@ -232,8 +233,9 @@ fn build_argv_get_manifest_covers_all_three_kinds() {
     let argv = build_argv_for_tests("get_manifest", &json!({ "kind": kind, "id": "x" })).unwrap();
     assert_eq!(argv[0], expected_group);
     assert_eq!(argv[1], "info");
-    assert_eq!(argv[2], "x");
-    assert_eq!(argv[3], "--json");
+    assert_eq!(argv[2], "--json");
+    assert_eq!(argv[3], "--");
+    assert_eq!(argv[4], "x");
   }
 }
 
@@ -295,9 +297,10 @@ fn build_argv_dry_run_maps_to_use_with_dry_run_flag() {
     argv,
     vec![
       "use".to_string(),
+      "--dry-run".to_string(),
+      "--".to_string(),
       "docker".to_string(),
       "add-entity".to_string(),
-      "--dry-run".to_string()
     ]
   );
 }
@@ -326,8 +329,9 @@ fn build_argv_undo_addon_maps_to_undo_with_yes() {
     argv,
     vec![
       "undo".to_string(),
+      "--yes".to_string(),
+      "--".to_string(),
       "docker".to_string(),
-      "--yes".to_string()
     ]
   );
 }

@@ -15,10 +15,24 @@ pub fn show_diff(baseline: &Path, work: &Path) {
     .arg("-ruN")
     .arg("-x")
     .arg("anesis.lock")
+    .arg("-x")
+    .arg(".git")
     .arg(baseline)
     .arg(work)
     .output()
   {
+    Ok(out) if out.status.code().is_none_or(|code| code > 1) => {
+      eprintln!(
+        "('diff' failed ({}); the changes could not be compared)",
+        out.status
+      );
+      let stderr = String::from_utf8_lossy(&out.stderr);
+      if !stderr.trim().is_empty() {
+        eprintln!("{}", stderr.trim());
+      }
+      eprintln!("  baseline: {}", baseline.display());
+      eprintln!("  after:    {}", work.display());
+    }
     Ok(out) => {
       let text = String::from_utf8_lossy(&out.stdout);
       if text.trim().is_empty() {

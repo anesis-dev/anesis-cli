@@ -115,12 +115,21 @@ pub async fn serve_local_auth_server(bound: AuthListener) -> Result<User> {
   }
 }
 
+fn constant_time_eq(a: &str, b: &str) -> bool {
+  a.len() == b.len()
+    && a
+      .bytes()
+      .zip(b.bytes())
+      .fold(0u8, |acc, (x, y)| acc | (x ^ y))
+      == 0
+}
+
 async fn callback(
   State((shared_tx, expected_state, frontend_url)): State<AppState>,
   Query(params): Query<HashMap<String, String>>,
 ) -> Redirect {
   match params.get("state") {
-    Some(state) if state == &expected_state => {}
+    Some(state) if constant_time_eq(state, &expected_state) => {}
     Some(_) => return Redirect::to(&format!("{}/cli/error?reason=invalid_state", frontend_url)),
     None => return Redirect::to(&format!("{}/cli/error?reason=missing_state", frontend_url)),
   }

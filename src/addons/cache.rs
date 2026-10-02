@@ -1,6 +1,6 @@
 use std::{fs, path::Path};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Utc;
 use comfy_table::{Attribute, Cell};
 use serde::{Deserialize, Serialize};
@@ -54,7 +54,12 @@ pub fn read_cache(addons_dir: &Path) -> Result<AddonsCache> {
   let index = addons_dir.join("anesis-addons.json");
   if index.exists() {
     let content = fs::read_to_string(&index)?;
-    Ok(serde_json::from_str(&content)?)
+    serde_json::from_str(&content).with_context(|| {
+      format!(
+        "The addon index '{}' is corrupt; delete it and re-run `anesis addon install <id>` to rebuild it",
+        index.display()
+      )
+    })
   } else {
     Ok(AddonsCache {
       last_updated: Utc::now().to_rfc3339(),
@@ -65,8 +70,7 @@ pub fn read_cache(addons_dir: &Path) -> Result<AddonsCache> {
 
 fn write_cache(addons_dir: &Path, cache: &AddonsCache) -> Result<()> {
   let index = addons_dir.join("anesis-addons.json");
-  fs::write(index, serde_json::to_string_pretty(cache)?)?;
-  Ok(())
+  crate::utils::atomic::write_atomic(&index, serde_json::to_string_pretty(cache)?.as_bytes())
 }
 
 pub fn update_addons_cache(
@@ -82,20 +86,22 @@ pub fn update_addons_cache(
     manifest.id
   );
 
-  let mut cache = read_cache(addons_dir)?;
+  crate::utils::atomic::with_file_lock(&addons_dir.join("anesis-addons.json"), || {
+    let mut cache = read_cache(addons_dir)?;
 
-  cache.last_updated = Utc::now().to_rfc3339();
-  cache.addons.retain(|a| a.id != manifest.id);
-  cache.addons.push(CachedAddon {
-    id: manifest.id.clone(),
-    name: manifest.name.clone(),
-    version: manifest.version.clone(),
-    path: subdir.to_string(),
-    commit_sha: commit_sha.to_string(),
-    repo_url: String::new(),
-  });
+    cache.last_updated = Utc::now().to_rfc3339();
+    cache.addons.retain(|a| a.id != manifest.id);
+    cache.addons.push(CachedAddon {
+      id: manifest.id.clone(),
+      name: manifest.name.clone(),
+      version: manifest.version.clone(),
+      path: subdir.to_string(),
+      commit_sha: commit_sha.to_string(),
+      repo_url: String::new(),
+    });
 
-  write_cache(addons_dir, &cache)
+    write_cache(addons_dir, &cache)
+  })
 }
 
 pub fn get_cached_addon(addons_dir: &Path, addon_id: &str) -> Result<Option<CachedAddon>> {
@@ -104,23 +110,25 @@ pub fn get_cached_addon(addons_dir: &Path, addon_id: &str) -> Result<Option<Cach
 }
 
 pub fn remove_addon_from_cache(addons_dir: &Path, addon_id: &str) -> Result<()> {
-  let mut cache = read_cache(addons_dir)?;
+  crate::utils::atomic::with_file_lock(&addons_dir.join("anesis-addons.json"), || {
+    let mut cache = read_cache(addons_dir)?;
 
-  let entry = cache
-    .addons
-    .iter()
-    .find(|a| a.id == addon_id)
-    .ok_or_else(|| anyhow::anyhow!("Addon '{}' is not installed", addon_id))?;
+    let entry = cache
+      .addons
+      .iter()
+      .find(|a| a.id == addon_id)
+      .ok_or_else(|| anyhow::anyhow!("Addon '{}' is not installed", addon_id))?;
 
-  let addon_dir = addons_dir.join(&entry.path);
-  if addon_dir.exists() {
-    fs::remove_dir_all(&addon_dir)?;
-  }
+    let addon_dir = addons_dir.join(&entry.path);
+    if addon_dir.exists() {
+      fs::remove_dir_all(&addon_dir)?;
+    }
 
-  cache.last_updated = Utc::now().to_rfc3339();
-  cache.addons.retain(|a| a.id != addon_id);
+    cache.last_updated = Utc::now().to_rfc3339();
+    cache.addons.retain(|a| a.id != addon_id);
 
-  write_cache(addons_dir, &cache)?;
+    write_cache(addons_dir, &cache)
+  })?;
   ui::success(format!("Removed addon '{addon_id}'"));
   Ok(())
 }

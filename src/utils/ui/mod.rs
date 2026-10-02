@@ -38,6 +38,10 @@ pub fn is_quiet() -> bool {
 
 pub fn init(ascii: bool) {
   caps::init(ascii);
+  let forced = std::env::var_os("CLICOLOR_FORCE").is_some_and(|v| v != "0");
+  if !forced && !std::io::IsTerminal::is_terminal(&std::io::stderr()) {
+    colored::control::set_override(false);
+  }
 }
 
 pub fn success(msg: impl AsRef<str>) {
@@ -45,7 +49,7 @@ pub fn success(msg: impl AsRef<str>) {
 }
 
 pub fn warn(msg: impl AsRef<str>) {
-  println!("{} {}", symbols::warn().yellow(), msg.as_ref());
+  eprintln!("{} {}", symbols::warn().yellow(), msg.as_ref());
 }
 
 pub fn warn_err(msg: impl AsRef<str>) {

@@ -1,14 +1,15 @@
 ---
 source: tests/json_output.rs
+assertion_line: 214
 expression: "cli.json(&[\"addon\", \"list\", \"--json\"])"
 ---
 [
   {
-    "commit_sha": "89abcdef0123456789abcdef0123456789abcdef",
     "id": "docker-compose",
     "name": "Docker Compose",
+    "version": "0.4.1",
     "path": "docker-compose",
-    "repo_url": "https://github.com/anesis-dev/addons",
-    "version": "0.4.1"
+    "commit_sha": "89abcdef0123456789abcdef0123456789abcdef",
+    "repo_url": "https://github.com/anesis-dev/addons"
   }
 ]

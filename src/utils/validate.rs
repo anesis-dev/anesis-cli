@@ -54,21 +54,44 @@ pub fn validate_project_name(name: &str) -> Result<()> {
     return Err(anyhow!("Project name cannot start with a dot"));
   }
 
-  if name.ends_with('.') || name.ends_with(' ') {
-    return Err(anyhow!("Project name cannot end with a dot or space"));
+  if name.ends_with('.') {
+    return Err(anyhow!("Project name cannot end with a dot"));
   }
 
-  let reserved_windows = [
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
-  ];
-
-  let stem = name.split('.').next().unwrap_or(name).to_uppercase();
-  if reserved_windows.contains(&stem.as_str()) {
+  if is_windows_reserved_name(name) {
     return Err(anyhow!("'{}' is a reserved name in Windows", name));
   }
 
   Ok(())
+}
+
+pub fn parse_bool(value: &str) -> Option<bool> {
+  match value.trim().to_ascii_lowercase().as_str() {
+    "true" | "yes" | "y" | "1" | "on" => Some(true),
+    "false" | "no" | "n" | "0" | "off" => Some(false),
+    _ => None,
+  }
+}
+
+pub fn is_windows_reserved_name(name: &str) -> bool {
+  const RESERVED: [&str; 8] = [
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$", "CONFIG$",
+  ];
+  let stem = name
+    .split('.')
+    .next()
+    .unwrap_or(name)
+    .trim_end()
+    .to_uppercase();
+  if RESERVED.contains(&stem.as_str()) {
+    return true;
+  }
+  let digit = |c: char| matches!(c, '0'..='9' | '¹' | '²' | '³');
+  ["COM", "LPT"].iter().any(|prefix| {
+    stem
+      .strip_prefix(prefix)
+      .is_some_and(|rest| rest.chars().count() == 1 && rest.chars().all(digit))
+  })
 }
 
 pub fn is_valid_github_repo_url(input: &str) -> Result<()> {
@@ -84,6 +107,16 @@ pub fn is_valid_github_repo_url(input: &str) -> Result<()> {
     return Err(anyhow!("URL is not a GitHub domain"));
   }
 
+  if !url.username().is_empty()
+    || url.password().is_some()
+    || url.query().is_some()
+    || url.fragment().is_some()
+  {
+    return Err(anyhow!(
+      "URL must not contain credentials, a query string, or a fragment"
+    ));
+  }
+
   let segments: Vec<_> = match url.path_segments() {
     Some(s) => s.collect(),
     None => {
@@ -91,8 +124,12 @@ pub fn is_valid_github_repo_url(input: &str) -> Result<()> {
     }
   };
 
-  if segments.len() < 2 {
-    return Err(anyhow!("URL does not point to a GitHub repository"));
+  let repo = segments.get(1).copied().unwrap_or("");
+  let repo_name = repo.strip_suffix(".git").unwrap_or(repo);
+  if segments.len() != 2 || segments[0].is_empty() || repo_name.is_empty() {
+    return Err(anyhow!(
+      "URL does not point to a GitHub repository (expected https://github.com/<owner>/<repo>)"
+    ));
   }
 
   Ok(())

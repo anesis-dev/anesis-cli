@@ -41,7 +41,7 @@ fn install_panic_hook() {
   std::panic::set_hook(Box::new(move |info| {
     picker::restore_terminal();
 
-    if std::env::var("ANESIS_DEBUG").is_ok() {
+    if anesis::context::env_flag("ANESIS_DEBUG") {
       default_hook(info);
       return;
     }
@@ -104,7 +104,7 @@ async fn run() -> Result<()> {
   let version_check_handle = if skip_version_notice {
     None
   } else {
-    let client = ctx.client.clone();
+    let client = config::version_check_client();
     let version_check_path = ctx.paths.version_check.clone();
     Some(tokio::spawn(async move {
       check_cli_version_cached(&client, &version_check_path).await
@@ -187,9 +187,11 @@ async fn run() -> Result<()> {
         template_name,
         json,
       } => {
+        validate_template_name(&template_name)?;
         anesis::templates::info::template_info(&ctx, &template_name, json).await?;
       }
       TemplateCommands::Remove { template_name } => {
+        validate_template_name(&template_name)?;
         remove_template_from_cache(&ctx.paths.templates, &template_name)?;
       }
       TemplateCommands::Publish {
@@ -381,7 +383,7 @@ async fn run() -> Result<()> {
       dry_run,
       diff,
     } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       let presets = parse_inputs(&input)?;
       let addon_id = match addon_id {
         Some(id) => id,
@@ -394,6 +396,10 @@ async fn run() -> Result<()> {
           let scratch = tempfile::Builder::new()
             .prefix("anesis-use-diff-")
             .tempdir()?;
+          let baseline = tempfile::Builder::new()
+            .prefix("anesis-use-base-")
+            .tempdir()?;
+          copy_dir_respecting_gitignore(&project_root, baseline.path())?;
           copy_dir_respecting_gitignore(&project_root, scratch.path())?;
           addons::runner::run_addon_command(
             &ctx,
@@ -406,7 +412,7 @@ async fn run() -> Result<()> {
           )
           .await?;
           println!();
-          addons::diff::show_diff(&project_root, scratch.path());
+          addons::diff::show_diff(baseline.path(), scratch.path());
         }
         Some(command_name) => {
           addons::runner::run_addon_command(
@@ -439,15 +445,15 @@ async fn run() -> Result<()> {
       }
     }
     Commands::Undo { addon_id, yes } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       addons::runner::undo_addon(&addon_id, &project_root, yes)?;
     }
     Commands::Outdated { json } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       addons::runner::outdated(&ctx, &project_root, json).await?;
     }
     Commands::Update { addon_id, yes, all } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       match (addon_id, all) {
         (Some(_), true) => {
           anyhow::bail!("Pass either an addon id or --all, not both.");
@@ -465,10 +471,31 @@ async fn run() -> Result<()> {
           if ids.is_empty() {
             println!("All addons are up to date.");
           } else {
+            let mut updated = 0usize;
+            let mut failed: Vec<String> = Vec::new();
             for id in &ids {
-              addons::runner::update_addon(&ctx, id, &project_root, yes).await?;
+              match addons::runner::update_addon(&ctx, id, &project_root, yes).await {
+                Ok(()) => updated += 1,
+                Err(err) => {
+                  if anesis::utils::cleanup::interrupted() {
+                    return Err(err);
+                  }
+                  ui::failure(format!("{id}: {err:#}"));
+                  failed.push(id.clone());
+                }
+              }
             }
-            ui::success(format!("Updated {} addon(s).", ids.len()));
+            if updated > 0 {
+              ui::success(format!("Updated {updated} addon(s)."));
+            }
+            if !failed.is_empty() {
+              anyhow::bail!(
+                "Failed to update {} of {} addon(s): {}",
+                failed.len(),
+                ids.len(),
+                failed.join(", ")
+              );
+            }
           }
         }
         (None, false) => {
@@ -503,9 +530,26 @@ async fn run() -> Result<()> {
       );
       sp.finish_and_clear();
 
-      let mut items: Vec<PickItem> = templates?.iter().map(|t| t.to_pick_item()).collect();
-      items.extend(addons?.iter().map(|a| a.to_pick_item()));
-      items.extend(stacks.unwrap_or_default().iter().map(|s| s.to_pick_item()));
+      let mut items: Vec<PickItem> = Vec::new();
+      let mut failures: Vec<(&str, anyhow::Error)> = Vec::new();
+      match templates {
+        Ok(found) => items.extend(found.iter().map(|t| t.to_pick_item())),
+        Err(err) => failures.push(("templates", err)),
+      }
+      match addons {
+        Ok(found) => items.extend(found.iter().map(|a| a.to_pick_item())),
+        Err(err) => failures.push(("addons", err)),
+      }
+      match stacks {
+        Ok(found) => items.extend(found.iter().map(|s| s.to_pick_item())),
+        Err(err) => failures.push(("stacks", err)),
+      }
+      if failures.len() == 3 {
+        return Err(failures.swap_remove(0).1);
+      }
+      for (kind, err) in &failures {
+        ui::warn_err(format!("could not load {kind} from the registry: {err:#}"));
+      }
 
       if json {
         let results = picker::search_results_json(&items, query.as_deref());
@@ -546,7 +590,7 @@ async fn run() -> Result<()> {
       }
     }
     Commands::Status { json } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       if json {
         println!(
           "{}",
@@ -557,7 +601,7 @@ async fn run() -> Result<()> {
       }
     }
     Commands::Doctor { json } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       let checks = anesis::doctor::run_checks(&ctx, &project_root).await;
       if json {
         println!(
@@ -572,18 +616,24 @@ async fn run() -> Result<()> {
       }
     }
     Commands::Why { path, json } => {
-      let project_root = std::env::current_dir()?;
+      let project_root = resolve_project_root()?;
       anesis::why::why(&project_root, path.as_deref(), json)?;
     }
   }
 
   if let Some(version_check_handle) = version_check_handle
-    && let Ok(Ok(Some(latest_version))) = version_check_handle.await
+    && let Ok(Ok(Ok(Some(latest_version)))) =
+      tokio::time::timeout(std::time::Duration::from_millis(300), version_check_handle).await
   {
-    println!("{}", render_upgrade_notice(&latest_version));
+    eprintln!("{}", render_upgrade_notice(&latest_version));
   }
 
   Ok(())
+}
+
+fn resolve_project_root() -> Result<std::path::PathBuf> {
+  let cwd = std::env::current_dir()?;
+  Ok(anesis::utils::fs::find_project_root(&cwd).unwrap_or(cwd))
 }
 
 async fn choose_template(ctx: &AppContext, installed: bool, title: &'static str) -> Result<String> {
@@ -597,7 +647,7 @@ async fn choose_template(ctx: &AppContext, installed: bool, title: &'static str)
   }
   match pick_one(items, title, false, String::new()).await? {
     Some((_, id, _)) => Ok(id),
-    None => anyhow::bail!("Selection cancelled"),
+    None => Err(AnesisError::Aborted.into()),
   }
 }
 
@@ -612,7 +662,7 @@ async fn choose_addon(ctx: &AppContext, installed: bool, title: &'static str) ->
   }
   match pick_one(items, title, false, String::new()).await? {
     Some((_, id, _)) => Ok(id),
-    None => anyhow::bail!("Selection cancelled"),
+    None => Err(AnesisError::Aborted.into()),
   }
 }
 
@@ -687,8 +737,12 @@ async fn create_new_project(
 
   let mut inputs = std::collections::HashMap::new();
   let mut excluded = std::collections::HashSet::new();
-  if let Some(manifest) = anesis::templates::generator::parse_template_manifest(&files) {
+  if let Some(manifest) = anesis::templates::generator::parse_template_manifest(&files)? {
     anesis::compat::check_anesis_version(template_name, &manifest.anesis_version)?;
+    addons::runner::reject_unknown_inputs(
+      presets,
+      manifest.inputs.iter().map(|i| i.name.as_str()),
+    )?;
     addons::runner::collect_inputs(&manifest.inputs, presets, yes, &mut inputs)?;
     excluded = anesis::templates::generator::excluded_paths(&manifest.exclude, &inputs);
   }
@@ -720,10 +774,10 @@ async fn create_new_project(
       overwrites.len()
     ));
     for path in overwrites.iter().take(20) {
-      println!("  {}", path.display());
+      eprintln!("  {}", path.display());
     }
     if overwrites.len() > 20 {
-      println!("  ...and {} more", overwrites.len() - 20);
+      eprintln!("  ...and {} more", overwrites.len() - 20);
     }
     if yes {
       anyhow::bail!(

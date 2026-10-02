@@ -29,7 +29,7 @@ pub fn skip_version_notice(command: &Commands, quiet: bool) -> bool {
     || quiet
     || matches!(
       command,
-      Commands::Upgrade | Commands::Completions { .. } | Commands::Man { .. }
+      Commands::Upgrade | Commands::Completions { .. } | Commands::Man { .. } | Commands::Mcp
     )
 }
 
@@ -39,6 +39,9 @@ pub fn parse_inputs(pairs: &[String]) -> anyhow::Result<HashMap<String, String>>
     let (name, value) = pair
       .split_once('=')
       .ok_or_else(|| anyhow::anyhow!("Invalid --input '{pair}'; expected NAME=VALUE"))?;
+    if name.trim().is_empty() {
+      anyhow::bail!("Invalid --input '{pair}'; the name before '=' cannot be empty");
+    }
     map.insert(name.to_string(), value.to_string());
   }
   Ok(map)

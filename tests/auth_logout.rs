@@ -65,7 +65,7 @@ fn logout_warns_when_anesis_token_still_takes_priority() {
     .assert()
     .success()
     .stdout(contains("Logout successful"))
-    .stdout(contains("ANESIS_TOKEN"));
+    .stderr(contains("ANESIS_TOKEN"));
 
   assert!(
     !home.child(".anesis/auth.json").path().exists(),
@@ -83,7 +83,7 @@ fn logout_succeeds_with_a_warning_when_only_anesis_token_is_set() {
     .assert()
     .success()
     .stdout(contains("No saved session"))
-    .stdout(contains("ANESIS_TOKEN"));
+    .stderr(contains("ANESIS_TOKEN"));
 }
 
 #[test]
@@ -100,5 +100,5 @@ fn logout_without_anesis_token_does_not_mention_it() {
     .assert()
     .success()
     .stdout(contains("Logout successful"))
-    .stdout(contains("ANESIS_TOKEN").not());
+    .stderr(contains("ANESIS_TOKEN").not());
 }
