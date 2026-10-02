@@ -70,6 +70,7 @@ pub async fn bind_local_auth_server(
 
 fn try_bind(port: u16) -> Result<tokio::net::TcpListener> {
   let socket = tokio::net::TcpSocket::new_v4()?;
+  #[cfg(not(windows))]
   socket.set_reuseaddr(true)?;
   socket.bind(format!("127.0.0.1:{port}").parse()?)?;
   Ok(socket.listen(1024)?)
