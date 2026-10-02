@@ -324,7 +324,7 @@ fn install_bash(script: &str) -> Result<()> {
 }
 
 fn bash_completions_dir() -> Result<PathBuf> {
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".local/share/bash-completion/completions"))
 }
 
@@ -359,7 +359,7 @@ fn zsh_config_file() -> Result<PathBuf> {
     return Ok(path);
   }
 
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".zshrc"))
 }
 
@@ -420,7 +420,7 @@ fn zdotdir_completions_dir() -> Option<PathBuf> {
 }
 
 fn home_zfunc_dir() -> Result<PathBuf> {
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".zfunc"))
 }
 
@@ -438,7 +438,7 @@ fn install_fish(script: &str) -> Result<()> {
 fn fish_completions_dir() -> Result<PathBuf> {
   let config_dir = match std::env::var("XDG_CONFIG_HOME") {
     Ok(dir) => PathBuf::from(dir),
-    Err(_) => dirs::home_dir()
+    Err(_) => home_dir()
       .context("Could not determine home directory")?
       .join(".config"),
   };
@@ -460,13 +460,13 @@ fn install_powershell(script: &str) -> Result<()> {
 }
 
 fn powershell_script_path() -> Result<PathBuf> {
-  let home = dirs::home_dir().context("Could not determine home directory")?;
+  let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".anesis").join("completions").join("anesis.ps1"))
 }
 
 fn powershell_profile_paths() -> Result<Vec<PathBuf>> {
   let documents_dir = dirs::document_dir()
-    .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
+    .or_else(|| home_dir().map(|home| home.join("Documents")))
     .context("Could not determine Documents directory")?;
   Ok(powershell_profile_paths_in(&documents_dir))
 }
@@ -589,4 +589,10 @@ fn write_completion_script(path: &Path, script: &str) -> Result<()> {
     .with_context(|| format!("Could not create directory {}", dir.display()))?;
   fs::write(path, script).with_context(|| format!("Could not write {}", path.display()))?;
   Ok(())
+}
+
+fn home_dir() -> Option<PathBuf> {
+  std::env::var_os("ANESIS_HOME")
+    .map(PathBuf::from)
+    .or_else(dirs::home_dir)
 }
