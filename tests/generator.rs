@@ -14,8 +14,8 @@ use anesis::{
       to_camel_case, to_kebab_case, to_pascal_case, to_snake_case,
     },
   },
+  utils::template_engine::{TemplateContext, hardened_env},
 };
-use tera::{Context, Tera};
 
 fn inputs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
   pairs
@@ -24,8 +24,8 @@ fn inputs(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     .collect()
 }
 
-fn make_context(project_name: &str) -> Context {
-  let mut ctx = Context::new();
+fn make_context(project_name: &str) -> TemplateContext {
+  let mut ctx = TemplateContext::new();
   ctx.insert("project_name", project_name);
   ctx.insert("project_name_kebab", &to_kebab_case(project_name));
   ctx.insert("project_name_snake", &to_snake_case(project_name));
@@ -59,11 +59,11 @@ fn renders_tera_file_and_strips_extension() {
     contents: b"# {{ project_name }}".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("my-app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -82,11 +82,11 @@ fn copies_non_tera_file_unchanged() {
     contents: b"console.log('hello')".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("my-app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -105,11 +105,11 @@ fn template_vars_kebab_and_snake() {
     contents: b"{{ project_name_kebab }} {{ project_name_snake }}".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("My_Project"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -128,11 +128,11 @@ fn creates_nested_output_directories() {
     contents: b"export default () => null".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -206,11 +206,11 @@ fn path_traversal_blocked_by_extract_dir_contents() {
     contents: b"evil".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   let result = extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -226,11 +226,11 @@ fn path_traversal_with_tera_file_blocked() {
     contents: b"escaped".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   let result = extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("app"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -249,11 +249,11 @@ fn renders_all_three_case_variables() {
     contents: b"{{ project_name }} {{ project_name_kebab }} {{ project_name_snake }}".to_vec(),
   }];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("My_App"),
     &make_app_context(),
     &std::collections::HashSet::new(),
@@ -278,11 +278,11 @@ fn multiple_tera_files_rendered_independently() {
     },
   ];
 
-  let mut tera = Tera::default();
+  let mut env = hardened_env();
   extract_dir_contents(
     &files,
     dir.path(),
-    &mut tera,
+    &mut env,
     &make_context("MyApp"),
     &make_app_context(),
     &std::collections::HashSet::new(),

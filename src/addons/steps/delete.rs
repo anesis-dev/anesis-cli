@@ -1,10 +1,11 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use crate::addons::manifest::DeleteStep;
 
 use super::{Rollback, StepFailure, StepResult, resolve_target};
 
-pub fn execute_delete(step: &DeleteStep, project_root: &Path, ctx: &tera::Context) -> StepResult {
+pub fn execute_delete(step: &DeleteStep, project_root: &Path, ctx: &TemplateContext) -> StepResult {
   let paths = resolve_target(&step.target, project_root, ctx)?;
   let mut rollbacks = Vec::new();
 

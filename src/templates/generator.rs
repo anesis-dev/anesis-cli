@@ -5,13 +5,16 @@ use std::{
 };
 
 use anyhow::{Context as _, Result, anyhow};
-use tera::{Context, Tera};
+use minijinja::Environment;
 
 use crate::{
   context::{AppContext, CleanupTask},
   manifest::AnesisManifest,
   templates::{AnesisTemplate, ExcludeBlock, TemplateFile},
-  utils::ui,
+  utils::{
+    template_engine::{TemplateContext, hardened_env, render_named},
+    ui,
+  },
 };
 
 use super::cache::get_cached_template;
@@ -44,7 +47,7 @@ pub fn extract_template(
     });
   }
 
-  let mut context = Context::new();
+  let mut context = TemplateContext::new();
   context.insert("project_name", project_name);
   context.insert("project_name_pascal", &to_pascal_case(project_name));
   context.insert("project_name_camel", &to_camel_case(project_name));
@@ -52,9 +55,9 @@ pub fn extract_template(
   context.insert("project_name_snake", &to_snake_case(project_name));
   insert_inputs(&mut context, inputs);
 
-  let mut tera = crate::utils::tera_sandbox::hardened_tera();
+  let mut env = hardened_env();
 
-  let result = extract_dir_contents(files, output_path, &mut tera, &context, ctx, excluded);
+  let result = extract_dir_contents(files, output_path, &mut env, &context, ctx, excluded);
 
   if result.is_ok() {
     let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
@@ -99,7 +102,7 @@ pub fn excluded_paths(
   set
 }
 
-fn insert_inputs(context: &mut Context, inputs: &HashMap<String, String>) {
+fn insert_inputs(context: &mut TemplateContext, inputs: &HashMap<String, String>) {
   for (k, v) in inputs {
     context.insert(k, v);
     context.insert(format!("{k}_pascal"), &to_pascal_case(v));
@@ -255,8 +258,8 @@ pub fn overwritten_paths(
 pub fn extract_dir_contents(
   files: &[TemplateFile],
   base_path: &Path,
-  tera: &mut Tera,
-  context: &Context,
+  env: &mut Environment<'static>,
+  context: &TemplateContext,
   ctx: &AppContext,
   excluded: &HashSet<PathBuf>,
 ) -> Result<()> {
@@ -292,8 +295,7 @@ pub fn extract_dir_contents(
       let output_path = output_path.with_file_name(output_name);
 
       let template_content = std::str::from_utf8(&file.contents)?;
-      tera.add_raw_template(&template_key, template_content)?;
-      let rendered = tera.render(&template_key, context)?;
+      let rendered = render_named(env, &template_key, template_content, context)?;
 
       fs::write(&output_path, rendered)?;
       println!("  {} {}", ui::symbols::ok(), output_path.display());

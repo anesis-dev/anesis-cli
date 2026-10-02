@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -10,7 +11,7 @@ use super::{Rollback, StepFailure, StepResult, render_string, resolve_target};
 pub fn execute_replace(
   step: &ReplaceStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   non_interactive: bool,
 ) -> StepResult {
   let paths = resolve_target(&step.target, project_root, ctx)?;

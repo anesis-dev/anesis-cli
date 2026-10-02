@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 use std::process::Command;
 
@@ -11,7 +12,7 @@ use super::{Rollback, StepFailure, StepResult};
 pub fn execute_run(
   step: &RunStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   non_interactive: bool,
   allow_run: bool,
 ) -> StepResult {
@@ -22,7 +23,7 @@ pub fn execute_run(
 fn execute_run_inner(
   step: &RunStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   non_interactive: bool,
   allow_run: bool,
 ) -> Result<Vec<Rollback>> {

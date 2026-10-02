@@ -1,17 +1,14 @@
 use anesis::addons::steps::render_string as addon_render_string;
-use anesis::utils::tera_sandbox::{hardened_tera, render_string};
+use anesis::utils::template_engine::{TemplateContext, hardened_env, render_named, render_string};
 
-fn ctx() -> tera::Context {
-  tera::Context::new()
+fn ctx() -> TemplateContext {
+  TemplateContext::new()
 }
 
 #[test]
-fn get_env_is_denied_by_hardened_tera() {
-  let mut tera = hardened_tera();
-  tera
-    .add_raw_template("t", "{{ get_env(name=\"HOME\") }}")
-    .unwrap();
-  let err: anyhow::Error = tera.render("t", &ctx()).unwrap_err().into();
+fn get_env_is_denied_by_hardened_env() {
+  let mut env = hardened_env();
+  let err = render_named(&mut env, "t", "{{ get_env(name=\"HOME\") }}", &ctx()).unwrap_err();
   assert!(format!("{err:?}").contains("get_env"));
 }
 
@@ -66,4 +63,34 @@ fn existing_filters_still_work() {
   c.insert("name", "world");
   let out = render_string("{{ name | upper }}", &c).unwrap();
   assert_eq!(out, "WORLD");
+}
+
+#[test]
+fn missing_variable_is_an_error_when_printed() {
+  assert!(render_string("{{ nope }}", &ctx()).is_err());
+}
+
+#[test]
+fn missing_variable_is_falsy_in_conditions() {
+  let out = render_string("{% if nope %}yes{% else %}no{% endif %}", &ctx()).unwrap();
+  assert_eq!(out, "no");
+}
+
+#[test]
+fn trailing_newline_is_preserved() {
+  let mut c = ctx();
+  c.insert("name", "app");
+  assert_eq!(render_string("{{ name }}\n", &c).unwrap(), "app\n");
+}
+
+#[test]
+fn output_is_not_html_escaped() {
+  let mut c = ctx();
+  c.insert("name", "<a&b>");
+  assert_eq!(render_string("{{ name }}", &c).unwrap(), "<a&b>");
+}
+
+#[test]
+fn github_actions_expressions_are_rejected_not_silently_swallowed() {
+  assert!(render_string("${{ matrix.os }}", &ctx()).is_err());
 }

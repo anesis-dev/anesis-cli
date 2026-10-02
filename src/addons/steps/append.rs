@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -6,7 +7,7 @@ use crate::addons::manifest::AppendStep;
 
 use super::{Rollback, StepFailure, StepResult, render_string, resolve_target};
 
-pub fn execute_append(step: &AppendStep, project_root: &Path, ctx: &tera::Context) -> StepResult {
+pub fn execute_append(step: &AppendStep, project_root: &Path, ctx: &TemplateContext) -> StepResult {
   let paths = resolve_target(&step.target, project_root, ctx)?;
   let rendered = render_string(&step.content, ctx)?;
 

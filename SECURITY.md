@@ -30,7 +30,7 @@ comfortable with.
 
 ### Templates
 
-A template is a directory of files rendered through Tera and written into your
+A template is a directory of files rendered through MiniJinja and written into your
 new project. Nothing in a template executes during scaffolding. Template paths
 are normalised and refused if they would escape the output directory.
 

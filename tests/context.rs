@@ -15,8 +15,8 @@ fn new_sets_default_backend_and_frontend_urls() {
   let cleanup_state: CleanupState = Arc::new(Mutex::new(None));
   let ctx = AppContext::new(make_paths(&tmp), Client::new(), cleanup_state);
 
-  assert_eq!(ctx.backend_url, "https://anesis-server.onrender.com");
-  assert_eq!(ctx.frontend_url, "https://anesis-dev.vercel.app");
+  assert_eq!(ctx.backend_url, "https://api.anesis.tech");
+  assert_eq!(ctx.frontend_url, "https://anesis.tech");
 }
 
 #[test]

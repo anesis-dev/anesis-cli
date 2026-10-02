@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use inquire::Confirm;
@@ -9,7 +10,7 @@ use super::{Rollback, StepFailure, StepResult};
 pub fn execute_create(
   step: &CreateStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   non_interactive: bool,
 ) -> StepResult {
   let rendered_path = super::render_string(&step.path, ctx)?;

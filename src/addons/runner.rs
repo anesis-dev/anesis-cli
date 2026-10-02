@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::{
   collections::HashMap,
   fs,
@@ -176,7 +177,7 @@ pub async fn run_addon_command(
     }
   }
 
-  let mut tera_ctx = tera::Context::new();
+  let mut template_ctx = TemplateContext::new();
 
   let mut input_values: HashMap<String, String> = HashMap::new();
   collect_inputs(
@@ -185,7 +186,7 @@ pub async fn run_addon_command(
     non_interactive,
     &mut input_values,
   )?;
-  insert_with_derived(&mut tera_ctx, &input_values);
+  insert_with_derived(&mut template_ctx, &input_values);
 
   let mut cmd_input_values: HashMap<String, String> = HashMap::new();
   collect_inputs(
@@ -194,7 +195,7 @@ pub async fn run_addon_command(
     non_interactive,
     &mut cmd_input_values,
   )?;
-  insert_with_derived(&mut tera_ctx, &cmd_input_values);
+  insert_with_derived(&mut template_ctx, &cmd_input_values);
 
   let combined_inputs: HashMap<String, String> = input_values
     .iter()
@@ -239,17 +240,23 @@ pub async fn run_addon_command(
     let handle = step_progress.start_step(idx, total, &label);
 
     let result = match step {
-      Step::Copy(s) => execute_copy(s, &addon_dir, project_root, &tera_ctx, non_interactive),
-      Step::Create(s) => execute_create(s, project_root, &tera_ctx, non_interactive),
-      Step::Inject(s) => execute_inject(s, project_root, &tera_ctx, non_interactive),
-      Step::Replace(s) => execute_replace(s, project_root, &tera_ctx, non_interactive),
-      Step::Append(s) => execute_append(s, project_root, &tera_ctx),
-      Step::Delete(s) => execute_delete(s, project_root, &tera_ctx),
-      Step::Rename(s) => execute_rename(s, project_root, &tera_ctx),
-      Step::Move(s) => execute_move(s, project_root, &tera_ctx),
+      Step::Copy(s) => execute_copy(s, &addon_dir, project_root, &template_ctx, non_interactive),
+      Step::Create(s) => execute_create(s, project_root, &template_ctx, non_interactive),
+      Step::Inject(s) => execute_inject(s, project_root, &template_ctx, non_interactive),
+      Step::Replace(s) => execute_replace(s, project_root, &template_ctx, non_interactive),
+      Step::Append(s) => execute_append(s, project_root, &template_ctx),
+      Step::Delete(s) => execute_delete(s, project_root, &template_ctx),
+      Step::Rename(s) => execute_rename(s, project_root, &template_ctx),
+      Step::Move(s) => execute_move(s, project_root, &template_ctx),
       Step::Packages(s) => execute_packages(s, project_root, non_interactive, ctx.allow_run),
-      Step::Run(s) => execute_run(s, project_root, &tera_ctx, non_interactive, ctx.allow_run),
-      Step::JsonPatch(s) => execute_json_patch(s, project_root, &tera_ctx),
+      Step::Run(s) => execute_run(
+        s,
+        project_root,
+        &template_ctx,
+        non_interactive,
+        ctx.allow_run,
+      ),
+      Step::JsonPatch(s) => execute_json_patch(s, project_root, &template_ctx),
     };
 
     match result {
@@ -672,7 +679,7 @@ pub fn collect_inputs(
   Ok(())
 }
 
-fn insert_with_derived(ctx: &mut tera::Context, map: &HashMap<String, String>) {
+fn insert_with_derived(ctx: &mut TemplateContext, map: &HashMap<String, String>) {
   for (k, v) in map {
     ctx.insert(k.as_str(), v);
     ctx.insert(format!("{k}_pascal"), &to_pascal_case(v));

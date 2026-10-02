@@ -2,12 +2,13 @@ use anesis::addons::{
   manifest::JsonPatchStep,
   steps::{Rollback, json_patch::execute_json_patch},
 };
+use anesis::utils::template_engine::TemplateContext;
 use assert_fs::prelude::*;
 use serde_json::json;
 use std::collections::HashMap;
 
-fn empty_ctx() -> tera::Context {
-  tera::Context::new()
+fn empty_ctx() -> TemplateContext {
+  TemplateContext::new()
 }
 
 fn write_json(dir: &assert_fs::TempDir, name: &str, value: &serde_json::Value) {

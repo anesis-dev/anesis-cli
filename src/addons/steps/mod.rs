@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -92,8 +93,8 @@ impl From<anyhow::Error> for StepFailure {
 
 pub type StepResult = std::result::Result<Vec<Rollback>, StepFailure>;
 
-pub fn render_string(s: &str, ctx: &tera::Context) -> Result<String> {
-  crate::utils::tera_sandbox::render_string(s, ctx)
+pub fn render_string(s: &str, ctx: &TemplateContext) -> Result<String> {
+  crate::utils::template_engine::render_string(s, ctx)
 }
 
 pub(super) fn safe_join(root: &Path, relative: &str, label: &str) -> Result<PathBuf> {
@@ -103,7 +104,7 @@ pub(super) fn safe_join(root: &Path, relative: &str, label: &str) -> Result<Path
 pub(super) fn resolve_target(
   target: &crate::addons::manifest::Target,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
 ) -> Result<Vec<PathBuf>> {
   use crate::addons::manifest::Target;
   match target {

@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use serde_json::Value;
@@ -9,7 +10,7 @@ use super::{Rollback, StepFailure, StepResult};
 pub fn execute_json_patch(
   step: &JsonPatchStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
 ) -> StepResult {
   let rendered_path = super::render_string(&step.path, ctx)?;
   let path = super::safe_join(project_root, &rendered_path, "json_patch path")?;

@@ -102,8 +102,8 @@ version-check cache. Inside a scaffolded project, applied addons are tracked in
 
 | Variable | Default | What it does |
 |---|---|---|
-| `ANESIS_BACKEND_URL` | `https://anesis-server.onrender.com` | Registry API to talk to. |
-| `ANESIS_FRONTEND_URL` | `https://anesis-dev.vercel.app` | Web app used for login redirects. |
+| `ANESIS_BACKEND_URL` | `https://api.anesis.tech` | Registry API to talk to. |
+| `ANESIS_FRONTEND_URL` | `https://anesis.tech` | Web app used for login redirects. |
 | `ANESIS_TOKEN` | — | Personal access token, for CI. Skips `anesis login`. |
 | `ANESIS_NO_TELEMETRY` | unset | Set to disable install-count reporting (see below). |
 | `ANESIS_ALLOW_RUN` | unset | Set to permit addon `run`/`packages` steps without a prompt (see below). |

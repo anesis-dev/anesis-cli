@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use anyhow::Context;
@@ -11,7 +12,7 @@ pub fn execute_copy(
   step: &CopyStep,
   addon_dir: &Path,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   non_interactive: bool,
 ) -> StepResult {
   let rendered_src = super::render_string(&step.src, ctx)?;
@@ -79,7 +80,7 @@ pub fn execute_copy(
 
 fn render_string_or_fail(
   text: &str,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   rollbacks: &[Rollback],
 ) -> Result<String, StepFailure> {
   super::render_string(text, ctx).map_err(|e| StepFailure::new(e, rollbacks.to_vec()))

@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -6,7 +7,7 @@ use crate::addons::manifest::RenameStep;
 
 use super::{Rollback, StepFailure, StepResult};
 
-pub fn execute_rename(step: &RenameStep, project_root: &Path, ctx: &tera::Context) -> StepResult {
+pub fn execute_rename(step: &RenameStep, project_root: &Path, ctx: &TemplateContext) -> StepResult {
   let rendered_from = super::render_string(&step.from, ctx)?;
   let rendered_to = super::render_string(&step.to, ctx)?;
   let from = super::safe_join(project_root, &rendered_from, "rename source")?;

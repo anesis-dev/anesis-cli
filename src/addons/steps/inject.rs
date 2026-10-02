@@ -1,3 +1,4 @@
+use crate::utils::template_engine::TemplateContext;
 use std::path::Path;
 
 use anyhow::anyhow;
@@ -14,7 +15,7 @@ fn normalize_whitespace(s: &str) -> String {
 pub fn execute_inject(
   step: &InjectStep,
   project_root: &Path,
-  ctx: &tera::Context,
+  ctx: &TemplateContext,
   non_interactive: bool,
 ) -> StepResult {
   if step.after.is_some() && step.before.is_some() {

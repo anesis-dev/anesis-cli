@@ -12,15 +12,16 @@ use anesis::addons::{
     run::execute_run,
   },
 };
+use anesis::utils::template_engine::TemplateContext;
 use assert_fs::prelude::*;
 use common::{addon_detect_pm_for_tests, addon_missing_pm_error_for_tests};
 
-fn empty_ctx() -> tera::Context {
-  tera::Context::new()
+fn empty_ctx() -> TemplateContext {
+  TemplateContext::new()
 }
 
-fn ctx_with(key: &str, val: &str) -> tera::Context {
-  let mut c = tera::Context::new();
+fn ctx_with(key: &str, val: &str) -> TemplateContext {
+  let mut c = TemplateContext::new();
   c.insert(key, val);
   c
 }
@@ -551,7 +552,7 @@ fn renames_file() {
     from: "old.txt".into(),
     to: "new.txt".into(),
   };
-  execute_rename(&step, dir.path(), &tera::Context::new()).unwrap();
+  execute_rename(&step, dir.path(), &TemplateContext::new()).unwrap();
 
   assert!(!dir.path().join("old.txt").exists());
   assert!(dir.path().join("new.txt").exists());
@@ -566,7 +567,7 @@ fn rename_rollback_reverses() {
     from: "old.txt".into(),
     to: "new.txt".into(),
   };
-  let rollbacks = execute_rename(&step, dir.path(), &tera::Context::new()).unwrap();
+  let rollbacks = execute_rename(&step, dir.path(), &TemplateContext::new()).unwrap();
   let canon_dir = dir.path().canonicalize().unwrap();
 
   match &rollbacks[0] {
@@ -585,7 +586,7 @@ fn rename_source_missing_is_err() {
     from: "ghost.txt".into(),
     to: "new.txt".into(),
   };
-  assert!(execute_rename(&step, dir.path(), &tera::Context::new()).is_err());
+  assert!(execute_rename(&step, dir.path(), &TemplateContext::new()).is_err());
 }
 
 #[test]
@@ -598,7 +599,7 @@ fn rename_target_exists_is_err() {
     from: "a.txt".into(),
     to: "b.txt".into(),
   };
-  assert!(execute_rename(&step, dir.path(), &tera::Context::new()).is_err());
+  assert!(execute_rename(&step, dir.path(), &TemplateContext::new()).is_err());
 }
 
 #[test]
@@ -610,7 +611,7 @@ fn rename_creates_destination_dirs() {
     from: "file.txt".into(),
     to: "a/b/c/file.txt".into(),
   };
-  execute_rename(&step, dir.path(), &tera::Context::new()).unwrap();
+  execute_rename(&step, dir.path(), &TemplateContext::new()).unwrap();
   assert!(dir.path().join("a/b/c/file.txt").exists());
 }
 
@@ -623,7 +624,7 @@ fn moves_file_to_new_directory() {
     from: "file.txt".into(),
     to: "subdir/file.txt".into(),
   };
-  execute_move(&step, dir.path(), &tera::Context::new()).unwrap();
+  execute_move(&step, dir.path(), &TemplateContext::new()).unwrap();
 
   assert!(!dir.path().join("file.txt").exists());
   assert!(dir.path().join("subdir/file.txt").exists());
@@ -638,7 +639,7 @@ fn move_creates_destination_dirs() {
     from: "file.txt".into(),
     to: "a/b/c/file.txt".into(),
   };
-  execute_move(&step, dir.path(), &tera::Context::new()).unwrap();
+  execute_move(&step, dir.path(), &TemplateContext::new()).unwrap();
   assert!(dir.path().join("a/b/c/file.txt").exists());
 }
 
@@ -649,7 +650,7 @@ fn move_source_missing_is_err() {
     from: "ghost.txt".into(),
     to: "dest.txt".into(),
   };
-  assert!(execute_move(&step, dir.path(), &tera::Context::new()).is_err());
+  assert!(execute_move(&step, dir.path(), &TemplateContext::new()).is_err());
 }
 
 #[test]
@@ -662,7 +663,7 @@ fn move_target_exists_is_err() {
     from: "a.txt".into(),
     to: "b.txt".into(),
   };
-  assert!(execute_move(&step, dir.path(), &tera::Context::new()).is_err());
+  assert!(execute_move(&step, dir.path(), &TemplateContext::new()).is_err());
 }
 
 #[test]
@@ -1049,7 +1050,7 @@ fn copy_without_render_does_not_propagate_executable_bit() {
 
 #[test]
 fn render_string_renders_multiline_control_blocks() {
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("enabled", &true);
   let rendered = render_string("{% if enabled %}\nyes\n{% endif %}", &ctx).unwrap();
   assert_eq!(rendered.trim(), "yes");
@@ -1057,7 +1058,7 @@ fn render_string_renders_multiline_control_blocks() {
 
 #[test]
 fn render_string_substitutes_variable() {
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("env", "production");
   let result = render_string(".env.{{ env }}", &ctx).unwrap();
   assert_eq!(result, ".env.production");
@@ -1065,14 +1066,14 @@ fn render_string_substitutes_variable() {
 
 #[test]
 fn render_string_no_variable_unchanged() {
-  let ctx = tera::Context::new();
+  let ctx = TemplateContext::new();
   let result = render_string("plain-string", &ctx).unwrap();
   assert_eq!(result, "plain-string");
 }
 
 #[test]
 fn render_string_multiple_variables() {
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("prefix", "my");
   ctx.insert("suffix", "app");
   let result = render_string("{{ prefix }}-{{ suffix }}", &ctx).unwrap();
@@ -1160,7 +1161,7 @@ fn inject_content_uses_template_vars() {
     if_not_found: IfNotFound::Error,
   };
 
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("lib", "cors");
   execute_inject(&step, dir.path(), &ctx, true).unwrap();
 
@@ -1185,7 +1186,7 @@ fn replace_uses_template_var_in_replacement() {
     if_not_found: IfNotFound::Error,
   };
 
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("port", "4000");
   execute_replace(&step, dir.path(), &ctx, true).unwrap();
 
@@ -1205,7 +1206,7 @@ fn append_uses_template_var_in_content() {
     content: "# added by {{ author }}".into(),
   };
 
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("author", "anesis");
   execute_append(&step, dir.path(), &ctx).unwrap();
 
@@ -1223,7 +1224,7 @@ fn rename_uses_template_vars_in_paths() {
     to: "{{ dest }}".into(),
   };
 
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("src", "env.example");
   ctx.insert("dest", ".env.local");
   execute_rename(&step, dir.path(), &ctx).unwrap();
@@ -1242,7 +1243,7 @@ fn move_uses_template_vars_in_paths() {
     to: "subdir/{{ dest }}".into(),
   };
 
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("src", "file.txt");
   ctx.insert("dest", "moved.txt");
   execute_move(&step, dir.path(), &ctx).unwrap();
@@ -1261,7 +1262,7 @@ fn create_uses_template_var_in_path() {
     if_exists: IfExists::Overwrite,
   };
 
-  let mut ctx = tera::Context::new();
+  let mut ctx = TemplateContext::new();
   ctx.insert("env", "test");
   execute_create(&step, dir.path(), &ctx, false).unwrap();
 

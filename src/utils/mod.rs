@@ -8,6 +8,6 @@ pub mod pathsafe;
 pub mod picker;
 pub mod sanitize;
 pub mod suggest;
-pub mod tera_sandbox;
+pub mod template_engine;
 pub mod ui;
 pub mod validate;
