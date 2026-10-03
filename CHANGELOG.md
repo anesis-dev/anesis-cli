@@ -18,6 +18,12 @@ Versions prior to 1.0.0 were not tracked in this file; see the
   `slugify`, `now()`, `truncate` and the `containing`/`starting_with` tests are not available.
 - A variable that is not provided still fails the render when printed, and is false inside `{% if %}`.
 
+## [1.0.1]
+
+### Fixed
+
+- CI: allow the `unused-mut` lint only on Windows in the `windows-latest` clippy job.
+
 ## [1.0.0]
 
 Anesis's first stable release. The CLI, registry manifest format, and
