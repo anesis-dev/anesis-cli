@@ -43,3 +43,19 @@ pub fn tree_last() -> &'static str {
 pub fn tree_vert() -> &'static str {
   if caps().unicode { "│  " } else { "|  " }
 }
+
+pub fn spinner_frames() -> &'static [&'static str] {
+  if caps().unicode {
+    &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+  } else {
+    &["|", "/", "-", "\\"]
+  }
+}
+
+pub fn picker_footer() -> &'static str {
+  if caps().unicode {
+    "↑↓ move · type to filter · enter select · esc cancel"
+  } else {
+    "up/down move - type to filter - enter select - esc cancel"
+  }
+}

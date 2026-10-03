@@ -39,7 +39,7 @@ pub struct AppContext {
   pub allow_run: bool,
 }
 
-fn env_flag(name: &str) -> bool {
+pub fn env_flag(name: &str) -> bool {
   match std::env::var(name) {
     Ok(value) => !matches!(
       value.trim().to_ascii_lowercase().as_str(),

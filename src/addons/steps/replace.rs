@@ -67,7 +67,7 @@ pub fn execute_replace(
 
     let new_content = content.replace(&step.find, &rendered_replace);
     rollbacks.push(Rollback::restore_file(path.clone(), original));
-    if let Err(e) = std::fs::write(&path, new_content) {
+    if let Err(e) = crate::utils::atomic::write_file_atomic(&path, new_content.as_bytes()) {
       return Err(StepFailure::new(e, rollbacks));
     }
   }

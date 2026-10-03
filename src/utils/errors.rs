@@ -22,6 +22,10 @@ pub enum AnesisError {
   NotATerminal(String),
   #[error("Aborted. No changes were made.")]
   Aborted,
+  #[error("The server rejected the request for {0}.")]
+  HttpClientError(String),
+  #[error("Interrupted.")]
+  Interrupted,
 }
 
 pub mod exit_code {
@@ -32,6 +36,7 @@ pub mod exit_code {
   pub const NOT_FOUND: i32 = 5;
   pub const NOT_A_TERMINAL: i32 = 6;
   pub const ABORTED: i32 = 7;
+  pub const INTERRUPTED: i32 = 130;
 }
 
 pub fn exit_code_for(err: &anyhow::Error) -> i32 {
@@ -47,6 +52,8 @@ pub fn exit_code_for(err: &anyhow::Error) -> i32 {
         | AnesisError::NetworkTimeout => exit_code::NETWORK,
         AnesisError::NotATerminal(_) => exit_code::NOT_A_TERMINAL,
         AnesisError::Aborted => exit_code::ABORTED,
+        AnesisError::HttpClientError(_) => exit_code::FAILURE,
+        AnesisError::Interrupted => exit_code::INTERRUPTED,
       };
     }
 
@@ -62,11 +69,20 @@ pub fn exit_code_for(err: &anyhow::Error) -> i32 {
       }) {
         return exit_code::AUTH;
       }
+      if reqwest_err.status().is_some_and(|s| s.is_client_error()) {
+        return exit_code::FAILURE;
+      }
       return exit_code::NETWORK;
     }
 
     if is_not_a_tty(cause) {
       return exit_code::NOT_A_TERMINAL;
+    }
+
+    match cause.downcast_ref::<inquire::InquireError>() {
+      Some(inquire::InquireError::OperationInterrupted) => return exit_code::INTERRUPTED,
+      Some(inquire::InquireError::OperationCanceled) => return exit_code::ABORTED,
+      _ => {}
     }
   }
 
@@ -90,7 +106,7 @@ pub fn classify_reqwest_error(err: reqwest::Error, resource: &str) -> anyhow::Er
   if let Some(status) = err.status() {
     return classify_status(status, resource).into();
   }
-  anyhow::anyhow!("Network error while fetching {resource}")
+  anyhow::Error::new(err).context(format!("Network error while fetching {resource}"))
 }
 
 fn classify_status(status: reqwest::StatusCode, resource: &str) -> AnesisError {
@@ -98,6 +114,8 @@ fn classify_status(status: reqwest::StatusCode, resource: &str) -> AnesisError {
     AnesisError::HttpUnauthorized
   } else if status == reqwest::StatusCode::NOT_FOUND {
     AnesisError::HttpNotFound(resource.to_string())
+  } else if status.is_client_error() {
+    AnesisError::HttpClientError(resource.to_string())
   } else {
     AnesisError::HttpServerError(resource.to_string())
   }
@@ -131,12 +149,28 @@ pub async fn check_response(
 }
 
 pub fn print_error(err: &anyhow::Error) {
-  if std::env::var("ANESIS_DEBUG").is_ok() {
+  if crate::context::env_flag("ANESIS_DEBUG") {
     ui::error_header(format!("{err:?}"));
     return;
   }
 
   for cause in err.chain() {
+    if matches!(
+      cause.downcast_ref::<inquire::InquireError>(),
+      Some(inquire::InquireError::OperationInterrupted)
+    ) || matches!(
+      cause.downcast_ref::<AnesisError>(),
+      Some(AnesisError::Interrupted)
+    ) {
+      return;
+    }
+    if matches!(
+      cause.downcast_ref::<inquire::InquireError>(),
+      Some(inquire::InquireError::OperationCanceled)
+    ) {
+      ui::note("Cancelled. No changes were made.");
+      return;
+    }
     if let Some(anesis_err) = cause.downcast_ref::<AnesisError>() {
       ui::error_header(err);
       if let Some(hint) = hint_for_anesis_error(anesis_err) {
@@ -162,7 +196,7 @@ pub fn print_error(err: &anyhow::Error) {
       if err.downcast_ref::<reqwest::Error>().is_some() {
         ui::error_header(friendly_reqwest_message(reqwest_err));
       } else {
-        ui::error_header(err);
+        ui::error_header(format!("{err:#}"));
       }
       if let Some(hint) = hint_for_reqwest_error(reqwest_err) {
         ui::hint_line(hint);
@@ -190,7 +224,7 @@ fn hint_for_anesis_error(err: &AnesisError) -> Option<&'static str> {
     AnesisError::NotATerminal(_) => Some(
       "Pass `--yes` to accept defaults, and `--input NAME=VALUE` for each value the addon needs.",
     ),
-    AnesisError::Aborted => None,
+    AnesisError::Aborted | AnesisError::Interrupted | AnesisError::HttpClientError(_) => None,
   }
 }
 

@@ -27,7 +27,7 @@ pub fn execute_create(
       IfExists::Skip => return Ok(rollbacks),
       IfExists::Ask => {
         if non_interactive {
-          println!("  {rendered_path} already exists — keeping it (pass no --yes to be asked)");
+          eprintln!("  {rendered_path} already exists — keeping it (pass no --yes to be asked)");
           return Ok(rollbacks);
         }
         let overwrite = Confirm::new(&format!("{rendered_path} already exists. Overwrite?"))
@@ -54,7 +54,7 @@ pub fn execute_create(
   {
     return Err(StepFailure::new(e, rollbacks));
   }
-  if let Err(e) = std::fs::write(&path, content) {
+  if let Err(e) = crate::utils::atomic::write_file_atomic(&path, content.as_bytes()) {
     return Err(StepFailure::new(e, rollbacks));
   }
 

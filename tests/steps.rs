@@ -1340,21 +1340,22 @@ fn packages_step_self_restores_snapshot_files_when_the_install_command_fails() {
     .unwrap();
   std::fs::set_permissions(fake_npm.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
 
-  let previous_path = std::env::var("PATH").unwrap_or_default();
-  unsafe {
-    std::env::set_var(
-      "PATH",
-      format!("{}:{previous_path}", bin_dir.path().display()),
-    )
-  };
+  let search_path = std::env::join_paths(std::iter::once(bin_dir.path().to_path_buf()).chain(
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+  ))
+  .unwrap();
 
   let step = PackagesStep {
     dependencies: vec!["left-pad".to_string()],
     dev_dependencies: vec![],
   };
-  let result = execute_packages(&step, dir.path(), true, true);
-
-  unsafe { std::env::set_var("PATH", previous_path) };
+  let result = anesis::addons::steps::packages::execute_packages_in(
+    &step,
+    dir.path(),
+    true,
+    true,
+    Some(&search_path),
+  );
 
   assert!(
     result.is_err(),
@@ -1373,7 +1374,7 @@ fn packages_step_self_restores_snapshot_files_when_the_install_command_fails() {
 }
 
 #[cfg(unix)]
-fn with_fake_npm<T>(script: &str, body: impl FnOnce() -> T) -> T {
+fn with_fake_npm<T>(script: &str, body: impl FnOnce(&std::ffi::OsStr) -> T) -> T {
   use std::os::unix::fs::PermissionsExt;
 
   let bin_dir = assert_fs::TempDir::new().unwrap();
@@ -1381,16 +1382,11 @@ fn with_fake_npm<T>(script: &str, body: impl FnOnce() -> T) -> T {
   fake_npm.write_str(script).unwrap();
   std::fs::set_permissions(fake_npm.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
 
-  let previous_path = std::env::var("PATH").unwrap_or_default();
-  unsafe {
-    std::env::set_var(
-      "PATH",
-      format!("{}:{previous_path}", bin_dir.path().display()),
-    )
-  };
-  let out = body();
-  unsafe { std::env::set_var("PATH", previous_path) };
-  out
+  let search_path = std::env::join_paths(std::iter::once(bin_dir.path().to_path_buf()).chain(
+    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()),
+  ))
+  .unwrap();
+  body(&search_path)
 }
 
 #[test]
@@ -1406,8 +1402,9 @@ fn packages_step_records_a_delete_rollback_for_a_lockfile_it_creates() {
     dependencies: vec!["left-pad".to_string()],
     dev_dependencies: vec![],
   };
-  let rollbacks = with_fake_npm("#!/bin/sh\necho created > package-lock.json\n", || {
-    execute_packages(&step, dir.path(), true, true).unwrap()
+  let rollbacks = with_fake_npm("#!/bin/sh\necho created > package-lock.json\n", |path| {
+    anesis::addons::steps::packages::execute_packages_in(&step, dir.path(), true, true, Some(path))
+      .unwrap()
   });
 
   assert!(dir.path().join("package-lock.json").exists());
@@ -1432,7 +1429,15 @@ fn packages_step_removes_a_lockfile_it_created_when_the_install_fails() {
   };
   let result = with_fake_npm(
     "#!/bin/sh\necho created > package-lock.json\nexit 1\n",
-    || execute_packages(&step, dir.path(), true, true),
+    |path| {
+      anesis::addons::steps::packages::execute_packages_in(
+        &step,
+        dir.path(),
+        true,
+        true,
+        Some(path),
+      )
+    },
   );
 
   assert!(result.is_err());

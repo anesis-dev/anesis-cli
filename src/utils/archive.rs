@@ -18,6 +18,18 @@ fn is_safe_relative(rel: &Path) -> bool {
     .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
 }
 
+pub(crate) fn has_windows_unsafe_component(rel: &Path) -> bool {
+  rel.components().any(|c| match c {
+    Component::Normal(name) => {
+      let name = name.to_string_lossy();
+      name.ends_with('.')
+        || name.ends_with(' ')
+        || crate::utils::validate::is_windows_reserved_name(&name)
+    }
+    _ => false,
+  })
+}
+
 const MAX_RESPONSE_BYTES: u64 = 100 * 1024 * 1024;
 const MAX_ENTRIES: usize = 20_000;
 const MAX_TOTAL_UNCOMPRESSED_BYTES: u64 = 512 * 1024 * 1024;
@@ -147,6 +159,12 @@ pub(crate) fn extract_tar_gz(bytes: Vec<u8>, dest: &Path, subdir: Option<&str>) 
         rel.display()
       ));
     }
+    if cfg!(windows) && has_windows_unsafe_component(&rel) {
+      return Err(anyhow!(
+        "refusing to extract entry with a name that is invalid on Windows: {}",
+        rel.display()
+      ));
+    }
 
     let entry_type = entry.header().entry_type();
     if entry_type.is_symlink() || entry_type.is_hard_link() {
@@ -196,7 +214,12 @@ pub async fn download_and_extract(
   let pb = ui::progress::download_bar(None);
   let bytes = download_capped(client, archive_url, token, Some(&pb)).await;
   pb.finish_and_clear();
-  extract_tar_gz(bytes?, dest, subdir)
+  let bytes = bytes?;
+  let dest = dest.to_path_buf();
+  let subdir = subdir.map(str::to_string);
+  tokio::task::spawn_blocking(move || extract_tar_gz(bytes, &dest, subdir.as_deref()))
+    .await
+    .map_err(|e| anyhow!("archive extraction task failed: {e}"))?
 }
 
 fn strip_archive_path(raw_path: &Path, subdir: Option<&str>) -> Option<PathBuf> {

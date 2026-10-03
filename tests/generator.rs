@@ -5,7 +5,7 @@ use std::{
 };
 
 use anesis::{
-  context::{AppContext, CleanupTask},
+  context::AppContext,
   paths::AnesisPaths,
   templates::{
     ExcludeBlock, TemplateFile,
@@ -57,6 +57,7 @@ fn renders_tera_file_and_strips_extension() {
   let files = vec![TemplateFile {
     path: PathBuf::from("README.md.tera"),
     contents: b"# {{ project_name }}".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -80,6 +81,7 @@ fn copies_non_tera_file_unchanged() {
   let files = vec![TemplateFile {
     path: PathBuf::from("src/index.ts"),
     contents: b"console.log('hello')".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -103,6 +105,7 @@ fn template_vars_kebab_and_snake() {
   let files = vec![TemplateFile {
     path: PathBuf::from("out.txt.tera"),
     contents: b"{{ project_name_kebab }} {{ project_name_snake }}".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -126,6 +129,7 @@ fn creates_nested_output_directories() {
   let files = vec![TemplateFile {
     path: PathBuf::from("src/components/Button.tsx"),
     contents: b"export default () => null".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -204,6 +208,7 @@ fn path_traversal_blocked_by_extract_dir_contents() {
   let files = vec![TemplateFile {
     path: PathBuf::from("../../etc/passwd"),
     contents: b"evil".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -224,6 +229,7 @@ fn path_traversal_with_tera_file_blocked() {
   let files = vec![TemplateFile {
     path: PathBuf::from("../sibling.txt"),
     contents: b"escaped".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -247,6 +253,7 @@ fn renders_all_three_case_variables() {
   let files = vec![TemplateFile {
     path: PathBuf::from("vars.txt.tera"),
     contents: b"{{ project_name }} {{ project_name_kebab }} {{ project_name_snake }}".to_vec(),
+    mode: None,
   }];
 
   let mut env = hardened_env();
@@ -271,10 +278,12 @@ fn multiple_tera_files_rendered_independently() {
     TemplateFile {
       path: PathBuf::from("a.txt.tera"),
       contents: b"A: {{ project_name }}".to_vec(),
+      mode: None,
     },
     TemplateFile {
       path: PathBuf::from("b.txt.tera"),
       contents: b"B: {{ project_name_kebab }}".to_vec(),
+      mode: None,
     },
   ];
 
@@ -327,6 +336,7 @@ fn extract_template_renders_pascal_and_camel_case_project_name() {
   let files = vec![TemplateFile {
     path: PathBuf::from("vars.txt.tera"),
     contents: b"{{ project_name_pascal }} {{ project_name_camel }}".to_vec(),
+    mode: None,
   }];
 
   extract_template(
@@ -348,14 +358,22 @@ fn extract_template_renders_pascal_and_camel_case_project_name() {
 }
 
 #[test]
-fn extract_template_registers_partial_project_cleanup_for_a_fresh_directory() {
+fn extract_template_removes_the_partial_project_when_rendering_fails() {
   let (_home, ctx, cleanup_state) = tempdir_app_context();
   let out = assert_fs::TempDir::new().unwrap();
   let fresh_dir = out.path().join("does-not-exist-yet");
-  let files = vec![TemplateFile {
-    path: PathBuf::from("bad.txt.tera"),
-    contents: b"{% if x %}".to_vec(),
-  }];
+  let files = vec![
+    TemplateFile {
+      path: PathBuf::from("a.txt"),
+      contents: b"written before the failure".to_vec(),
+      mode: None,
+    },
+    TemplateFile {
+      path: PathBuf::from("bad.txt.tera"),
+      contents: b"{% if x %}".to_vec(),
+      mode: None,
+    },
+  ];
 
   let result = extract_template(
     &files,
@@ -367,23 +385,15 @@ fn extract_template_registers_partial_project_cleanup_for_a_fresh_directory() {
   );
   assert!(result.is_err(), "the malformed tera template must fail");
 
-  let guard = cleanup_state.lock().unwrap();
-  match guard.as_ref() {
-    Some(CleanupTask::PartialProject { path }) => assert_eq!(path, &fresh_dir),
-    other => panic!(
-      "expected a PartialProject cleanup task to survive the failure, got {}",
-      match other {
-        Some(_) => "a different task",
-        None =>
-          "nothing — the old bug: cleanup_state was cleared before the error \
-                  could be inspected, leaving a half-written directory with no cleanup path",
-      }
-    ),
-  }
+  assert!(
+    !fresh_dir.exists(),
+    "a half-generated project must be removed so the command can be retried"
+  );
+  assert!(cleanup_state.lock().unwrap().is_none());
 }
 
 #[test]
-fn extract_template_registers_only_new_files_when_the_directory_already_existed() {
+fn extract_template_removes_only_new_files_when_the_directory_already_existed() {
   let (_home, ctx, cleanup_state) = tempdir_app_context();
   let out = assert_fs::TempDir::new().unwrap();
   std::fs::create_dir_all(out.path()).unwrap();
@@ -393,10 +403,12 @@ fn extract_template_registers_only_new_files_when_the_directory_already_existed(
     TemplateFile {
       path: PathBuf::from("new-file.txt"),
       contents: b"new content".to_vec(),
+      mode: None,
     },
     TemplateFile {
       path: PathBuf::from("bad.txt.tera"),
       contents: b"{% if x %}".to_vec(),
+      mode: None,
     },
   ];
 
@@ -410,27 +422,16 @@ fn extract_template_registers_only_new_files_when_the_directory_already_existed(
   );
   assert!(result.is_err());
 
-  let guard = cleanup_state.lock().unwrap();
-  match guard.as_ref() {
-    Some(CleanupTask::PartialProjectFiles { paths }) => {
-      assert!(
-        paths.iter().any(|p| p.ends_with("new-file.txt")),
-        "the newly-created file must be tracked for cleanup: {paths:?}"
-      );
-      assert!(
-        !paths.iter().any(|p| p.ends_with("pre-existing.txt")),
-        "a file that predates this generation must never be tracked for deletion: {paths:?}"
-      );
-    }
-    other => panic!(
-      "expected PartialProjectFiles (not PartialProject — the directory already existed, \
-       so a whole-directory delete would destroy content this run never touched), got {}",
-      match other {
-        Some(_) => "a different task",
-        None => "nothing",
-      }
-    ),
-  }
+  assert!(
+    !out.path().join("new-file.txt").exists(),
+    "files created by the failed generation must be removed"
+  );
+  assert_eq!(
+    std::fs::read_to_string(out.path().join("pre-existing.txt")).unwrap(),
+    "keep me",
+    "a file that predates this generation must never be deleted"
+  );
+  assert!(cleanup_state.lock().unwrap().is_none());
 }
 
 #[test]
@@ -440,6 +441,7 @@ fn extract_template_clears_the_cleanup_task_on_success() {
   let files = vec![TemplateFile {
     path: PathBuf::from("ok.txt"),
     contents: b"fine".to_vec(),
+    mode: None,
   }];
 
   extract_template(
@@ -466,6 +468,7 @@ fn overwritten_paths_and_is_excluded_agree_on_the_tera_stripped_name() {
   let files = vec![TemplateFile {
     path: PathBuf::from("config.txt.tera"),
     contents: b"{{ project_name }}".to_vec(),
+    mode: None,
   }];
 
   let hits = overwritten_paths(&files, out.path(), &std::collections::HashSet::new()).unwrap();
@@ -488,6 +491,7 @@ fn extract_template_blocks_a_template_path_that_escapes_through_a_pre_existing_s
   let files = vec![TemplateFile {
     path: PathBuf::from("escape/evil.txt"),
     contents: b"pwned".to_vec(),
+    mode: None,
   }];
 
   let result = extract_template(

@@ -1,15 +1,40 @@
-use std::{fs, path::Path};
+use std::{
+  fs,
+  path::Path,
+  sync::atomic::{AtomicBool, Ordering},
+  time::Duration,
+};
 
 use anyhow::Result;
 
 use crate::addons::runner::apply_rollback;
 use crate::context::{CleanupState, CleanupTask};
-use crate::utils::ui;
+use crate::utils::{errors::AnesisError, ui};
+
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+const MAIN_THREAD_GRACE: Duration = Duration::from_secs(2);
+
+pub fn interrupted() -> bool {
+  INTERRUPTED.load(Ordering::SeqCst)
+}
+
+pub fn check_interrupted() -> Result<()> {
+  if interrupted() {
+    return Err(AnesisError::Interrupted.into());
+  }
+  Ok(())
+}
 
 pub fn setup_ctrlc_handler(cleanup_state: CleanupState) -> Result<()> {
   ctrlc::set_handler(move || {
-    println!();
+    if INTERRUPTED.swap(true, Ordering::SeqCst) {
+      return;
+    }
+    eprintln!();
     ui::warn("Interrupted! Cleaning up...");
+
+    std::thread::sleep(MAIN_THREAD_GRACE);
 
     let task = {
       let mut guard = cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
@@ -20,10 +45,15 @@ pub fn setup_ctrlc_handler(cleanup_state: CleanupState) -> Result<()> {
       run_cleanup(&task);
     }
 
-    std::process::exit(130);
+    std::process::exit(crate::utils::errors::exit_code::INTERRUPTED);
   })?;
 
   Ok(())
+}
+
+#[doc(hidden)]
+pub fn set_interrupted_for_tests(value: bool) {
+  INTERRUPTED.store(value, Ordering::SeqCst);
 }
 
 pub fn run_cleanup(task: &CleanupTask) {
@@ -92,12 +122,23 @@ pub fn run_cleanup(task: &CleanupTask) {
       }
 
       let count = steps.len();
+      let mut failed = 0usize;
       for rollback in steps.into_iter().rev() {
-        let _ = apply_rollback(rollback, project_root);
+        if let Err(err) = apply_rollback(rollback, project_root) {
+          failed += 1;
+          ui::failure(format!("{err:#}"));
+        }
       }
-      ui::success(format!(
-        "Rolled back {count} step(s) from addon '{addon_id}'"
-      ));
+      if failed == 0 {
+        ui::success(format!(
+          "Rolled back {count} step(s) from addon '{addon_id}'"
+        ));
+      } else {
+        ui::warn_err(format!(
+          "Rolled back {} of {count} step(s) from addon '{addon_id}'; the rest could not be reverted",
+          count - failed
+        ));
+      }
     }
   }
 }

@@ -41,6 +41,7 @@ fn get_env_is_denied_in_template_files() {
   let files = vec![TemplateFile {
     path: PathBuf::from("leaked.txt.tera"),
     contents: b"{{ get_env(name=\"AUDIT_FAKE_SECRET\") }}".to_vec(),
+    mode: None,
   }];
 
   let err = extract_template(

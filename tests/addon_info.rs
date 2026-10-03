@@ -4,6 +4,7 @@ use anesis::addons::manifest::{
   InputType, MoveStep, PackagesStep, RenameStep, ReplaceStep, RunStep, Step, Target,
 };
 use anesis::addons::runner::step_label_for_tests;
+use anesis::utils::ui::symbols;
 
 fn input(
   input_type: InputType,
@@ -78,7 +79,8 @@ fn input_line_combines_required_default_and_options() {
 
 #[test]
 fn step_label_covers_every_step_variant() {
-  let cases: Vec<(Step, &str)> = vec![
+  let arrow = symbols::arrow();
+  let cases: Vec<(Step, String)> = vec![
     (
       Step::Copy(CopyStep {
         src: "a".into(),
@@ -86,7 +88,7 @@ fn step_label_covers_every_step_variant() {
         if_exists: IfExists::Overwrite,
         render: false,
       }),
-      "copy 'a' → 'b'",
+      format!("copy 'a' {arrow} 'b'"),
     ),
     (
       Step::Create(CreateStep {
@@ -94,7 +96,7 @@ fn step_label_covers_every_step_variant() {
         content: String::new(),
         if_exists: IfExists::Overwrite,
       }),
-      "create 'f.txt'",
+      "create 'f.txt'".into(),
     ),
     (
       Step::Inject(InjectStep {
@@ -106,7 +108,7 @@ fn step_label_covers_every_step_variant() {
         before: None,
         if_not_found: IfNotFound::Error,
       }),
-      "inject into 'f.txt'",
+      "inject into 'f.txt'".into(),
     ),
     (
       Step::Replace(ReplaceStep {
@@ -117,7 +119,7 @@ fn step_label_covers_every_step_variant() {
         replace: String::new(),
         if_not_found: IfNotFound::Error,
       }),
-      "replace in '*.txt'",
+      "replace in '*.txt'".into(),
     ),
     (
       Step::Append(AppendStep {
@@ -126,7 +128,7 @@ fn step_label_covers_every_step_variant() {
         },
         content: String::new(),
       }),
-      "append to 'f.txt'",
+      "append to 'f.txt'".into(),
     ),
     (
       Step::Delete(DeleteStep {
@@ -134,35 +136,35 @@ fn step_label_covers_every_step_variant() {
           file: "f.txt".into(),
         },
       }),
-      "delete 'f.txt'",
+      "delete 'f.txt'".into(),
     ),
     (
       Step::Rename(RenameStep {
         from: "a".into(),
         to: "b".into(),
       }),
-      "rename 'a' → 'b'",
+      format!("rename 'a' {arrow} 'b'"),
     ),
     (
       Step::Move(MoveStep {
         from: "a".into(),
         to: "b".into(),
       }),
-      "move 'a' → 'b'",
+      format!("move 'a' {arrow} 'b'"),
     ),
     (
       Step::Packages(PackagesStep {
         dependencies: vec!["left-pad".into()],
         dev_dependencies: vec!["jest".into(), "eslint".into()],
       }),
-      "install 3 package(s)",
+      "install 3 package(s)".into(),
     ),
     (
       Step::Run(RunStep {
         command: "echo hi".into(),
         description: String::new(),
       }),
-      "run 'echo hi'",
+      "run 'echo hi'".into(),
     ),
   ];
 

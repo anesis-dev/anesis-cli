@@ -211,9 +211,7 @@ fn picker_loop(
     if matches.is_empty() {
       lines.push(ui::muted("  no matches"));
     }
-    lines.push(ui::muted(
-      "↑↓ move · type to filter · enter select · esc cancel",
-    ));
+    lines.push(ui::muted(ui::symbols::picker_footer()));
 
     queue!(out, Clear(ClearType::All))?;
     for (row, line) in lines.iter().enumerate() {

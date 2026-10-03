@@ -13,7 +13,7 @@ pub fn link_stack(ctx: &AppContext, source: &Path, force: bool) -> Result<Option
   let manifest: StackManifest = load_stack(source)
     .with_context(|| format!("Could not read a stack manifest at {}", source.display()))?;
 
-  let dest = cached_path(ctx, &manifest.id);
+  let dest = cached_path(ctx, &manifest.id)?;
   if !dest.starts_with(&ctx.paths.stacks) {
     anyhow::bail!(
       "stack id '{}' would resolve outside the stacks cache directory",
@@ -33,7 +33,7 @@ pub fn link_stack(ctx: &AppContext, source: &Path, force: bool) -> Result<Option
   }
 
   std::fs::create_dir_all(&ctx.paths.stacks)?;
-  std::fs::write(&dest, serde_json::to_string_pretty(&manifest)?)
+  crate::utils::atomic::write_atomic(&dest, serde_json::to_string_pretty(&manifest)?.as_bytes())
     .with_context(|| format!("Failed to cache the stack at {}", dest.display()))?;
 
   Ok(Some(manifest.id))

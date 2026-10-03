@@ -29,10 +29,11 @@ pub fn print_installed_stacks(ctx: &AppContext, json: bool) -> Result<()> {
 }
 
 pub async fn stack_info(ctx: &AppContext, stack_id: &str, json: bool) -> Result<()> {
+  cached_path(ctx, stack_id)?;
   let manifest = match fetch_stack_manifest(ctx, stack_id).await {
     Ok(m) => m,
     Err(e) => {
-      let cached = cached_path(ctx, stack_id);
+      let cached = cached_path(ctx, stack_id)?;
       if cached.exists() {
         load_stack(&cached)?
       } else {

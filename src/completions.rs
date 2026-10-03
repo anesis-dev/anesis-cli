@@ -316,14 +316,23 @@ fn install_bash(script: &str) -> Result<()> {
   write_completion_script(&dest, script)?;
   println!("Written to {}", dest.display());
   println!(
-    "\nTo activate, add this to your ~/.bashrc (if not already present):\n\
-     \n  source ~/.local/share/bash-completion/completions/anesis\n\
-     \nThen restart your shell or run:  source ~/.bashrc"
+    "\nIf the bash-completion package is installed it loads this file automatically; just \
+     restart your shell.\n\
+     Otherwise add this to your ~/.bashrc:\n\
+     \n  source {}\n\
+     \nThen restart your shell or run:  source ~/.bashrc",
+    dest.display()
   );
   Ok(())
 }
 
 fn bash_completions_dir() -> Result<PathBuf> {
+  if let Some(data_home) = std::env::var_os("XDG_DATA_HOME")
+    .map(PathBuf::from)
+    .filter(|p| p.is_absolute())
+  {
+    return Ok(data_home.join("bash-completion/completions"));
+  }
   let home = home_dir().context("Could not determine home directory")?;
   Ok(home.join(".local/share/bash-completion/completions"))
 }
@@ -403,7 +412,7 @@ pub fn zsh_fpath_snippet(fpath_dir: &Path) -> String {
   format!(
     "# anesis completions start\n\
 fpath=('{dir}' $fpath)\n\
-autoload -Uz compinit && compinit\n\
+(( $+functions[compdef] )) || {{ autoload -Uz compinit && compinit -C; }}\n\
 # anesis completions end"
   )
 }

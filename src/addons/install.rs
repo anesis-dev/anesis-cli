@@ -189,18 +189,25 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
     )?));
   }
 
+  crate::utils::fs::remove_stale_tmp_siblings(&addon_dir);
+  let replacing_existing = install_state == InstallState::Update && addon_dir.exists();
+  let extract_dest = if replacing_existing {
+    let name = addon_dir
+      .file_name()
+      .map(|n| n.to_string_lossy().into_owned())
+      .unwrap_or_default();
+    addon_dir.with_file_name(format!("{name}.tmp-{}", std::process::id()))
+  } else {
+    addon_dir.clone()
+  };
+
   {
     let mut guard = ctx.cleanup_state.lock().unwrap_or_else(|e| e.into_inner());
     *guard = Some(CleanupTask::PartialDownload {
-      path: addon_dir.clone(),
+      path: extract_dest.clone(),
       prune_root: ctx.paths.addons.clone(),
       label: "addon",
     });
-  }
-
-  if install_state == InstallState::Update && addon_dir.exists() {
-    std::fs::remove_dir_all(&addon_dir)
-      .with_context(|| format!("Failed to clear stale addon at {}", addon_dir.display()))?;
   }
 
   let action = if install_state == InstallState::Update {
@@ -214,7 +221,7 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
   let download_result = download_and_extract(
     &ctx.client,
     &info.archive_url,
-    &addon_dir,
+    &extract_dest,
     info.subdir.as_deref(),
     info.archive_token.as_deref(),
   )
@@ -231,19 +238,43 @@ pub async fn install_addon(ctx: &AppContext, addon_id: &str) -> Result<AddonInst
     *guard = None;
   }
 
-  download_result?;
+  let staged = download_result.and_then(|()| {
+    let manifest_path = extract_dest.join("anesis.addon.json");
+    let content = std::fs::read_to_string(&manifest_path).with_context(|| {
+      format!(
+        "Addon '{addon_id}' was extracted but 'anesis.addon.json' was not found at {}. \
+         Make sure the addon archive contains a top-level '{addon_id}/' directory with 'anesis.addon.json' inside.",
+        manifest_path.display()
+      )
+    })?;
+    super::manifest::parse(&content)
+      .with_context(|| format!("Failed to parse anesis.addon.json for addon '{addon_id}'"))
+  });
 
-  let manifest_path = addon_dir.join("anesis.addon.json");
-  let content = std::fs::read_to_string(&manifest_path).with_context(|| {
-    format!(
-      "Addon '{addon_id}' was extracted but 'anesis.addon.json' was not found at {}. \
-       Make sure the addon archive contains a top-level '{addon_id}/' directory with 'anesis.addon.json' inside.",
-      manifest_path.display()
-    )
-  })?;
+  let manifest: AddonManifest = match staged {
+    Ok(manifest) => manifest,
+    Err(err) if replacing_existing => {
+      let _ = std::fs::remove_dir_all(&extract_dest);
+      return Err(err).with_context(|| {
+        format!(
+          "the previously-cached addon at {} is unaffected",
+          addon_dir.display()
+        )
+      });
+    }
+    Err(err) => return Err(err),
+  };
 
-  let manifest: AddonManifest = super::manifest::parse(&content)
-    .with_context(|| format!("Failed to parse anesis.addon.json for addon '{addon_id}'"))?;
+  if replacing_existing {
+    std::fs::remove_dir_all(&addon_dir)
+      .with_context(|| format!("Failed to clear stale addon at {}", addon_dir.display()))?;
+    std::fs::rename(&extract_dest, &addon_dir).with_context(|| {
+      format!(
+        "Failed to move downloaded addon into place at {}",
+        addon_dir.display()
+      )
+    })?;
+  }
 
   update_addons_cache(addons_dir, addon_id, &manifest, &info.commit_sha)
     .with_context(|| format!("Failed to update addons cache after installing '{addon_id}'"))?;

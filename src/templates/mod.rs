@@ -15,6 +15,7 @@ pub mod republish;
 pub struct TemplateFile {
   pub path: PathBuf,
   pub contents: Vec<u8>,
+  pub mode: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize)]

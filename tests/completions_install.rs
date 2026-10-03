@@ -8,6 +8,7 @@ fn command(home: &TempDir) -> Command {
     .env("USERPROFILE", home.path())
     .env("ANESIS_HOME", home.path())
     .env_remove("XDG_CONFIG_HOME")
+    .env_remove("XDG_DATA_HOME")
     .env_remove("ZDOTDIR");
   cmd
 }
@@ -39,6 +40,25 @@ fn print_mode_does_not_write_any_files() {
     !home.path().join(".local").exists(),
     "--print must not install anything"
   );
+}
+
+#[test]
+fn install_bash_honours_xdg_data_home() {
+  let home = TempDir::new().unwrap();
+  let data_home = TempDir::new().unwrap();
+  command(&home)
+    .env("XDG_DATA_HOME", data_home.path())
+    .args(["completions", "bash"])
+    .assert()
+    .success();
+
+  assert!(
+    data_home
+      .path()
+      .join("bash-completion/completions/anesis")
+      .exists()
+  );
+  assert!(!home.path().join(".local").exists());
 }
 
 #[test]

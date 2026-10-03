@@ -179,6 +179,7 @@ pub async fn install_template(ctx: &AppContext, template_name: &str) -> Result<I
     return Ok(InstallResult::UpToDate);
   }
 
+  crate::utils::fs::remove_stale_tmp_siblings(&dest);
   let replacing_existing = install_state == InstallState::Update && dest.exists();
   let extract_dest = if replacing_existing {
     ctx

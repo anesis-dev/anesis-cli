@@ -77,23 +77,7 @@ pub fn generate_state_token_for_tests() -> String {
 }
 
 fn write_auth_file(path: &Path, content: &str) -> Result<()> {
-  #[cfg(unix)]
-  {
-    use std::io::Write;
-    use std::os::unix::fs::PermissionsExt;
-    let mut file = std::fs::OpenOptions::new()
-      .write(true)
-      .create(true)
-      .truncate(true)
-      .open(path)?;
-    file.write_all(content.as_bytes())?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-  }
-  #[cfg(not(unix))]
-  {
-    std::fs::write(path, content)?;
-  }
-  Ok(())
+  crate::utils::atomic::write_private_atomic(path, content.as_bytes())
 }
 
 #[doc(hidden)]

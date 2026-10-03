@@ -10,7 +10,50 @@ Versions prior to 1.0.0 were not tracked in this file; see the
 
 ## [Unreleased]
 
+### Fixed
+
+- `anesis use --diff` no longer prints gitignored files (such as `.env`) or `node_modules`; both sides of the
+  diff are now built with the same gitignore-aware copy, and `.git` is excluded.
+- `anesis update` re-applies addon-level inputs, asks for confirmation once before undoing anything, and
+  restores the previous version (files, `anesis.lock`, `anesis.json`) if re-applying fails.
+- Ctrl-C, SIGTERM and SIGHUP now stop the running command cooperatively: the rollback runs on the main thread
+  after the current step finishes, never concurrently with it. Cancelling a prompt exits with 130 (interrupt)
+  or 7 (cancel) instead of 1.
+- Choosing "Keep changes" after a failed step records the partial journal in `anesis.lock` (command name
+  suffixed with ` (incomplete)`) so `anesis undo` can still revert it. Rollback failures are reported instead
+  of being swallowed, and leftovers are kept in the lock.
+- A template render error removes the half-generated project, so the command can be retried.
+- Executable permissions of template files are preserved in generated projects.
+- `json_patch` keeps key order and indentation, supports JSON Pointer paths (`/exports/~1package.json`),
+  and errors instead of silently replacing non-object parents.
+- Project commands (`use`, `undo`, `update`, `outdated`, `status`, `doctor`, `why`) find the project root by
+  walking up to the nearest `anesis.json` / `anesis.lock`.
+- `run` step commands shell-quote every interpolated value; `packages` steps reject specs starting with `-`.
+- Unknown `--input` names are rejected (with a "did you mean" hint); `select` and `boolean` values are
+  validated and booleans are normalised.
+- `anesis.lock` stores original file contents as base64 (legacy byte arrays still load); journal entries
+  under `.git`/`.hg`/`.svn` are ignored and restored modes are masked to `0o777`.
+- Cache indexes, `anesis.json`, the version cache and `auth.json` are written atomically; the addon and
+  template indexes are updated under a file lock. `auth.json` is created `0600`, `~/.anesis` `0700`.
+  `write_atomic` follows symlinks and keeps the target's permissions.
+- Stack IDs and template names are validated before they are used as cache paths.
+- Updating a cached addon extracts to a temporary sibling and swaps it in only on success.
+- The new-version check waits at most 300 ms at exit, uses a 2 s client and caches failures for an hour.
+- Warnings and notices go to stderr; colour is disabled unless stderr is also a terminal; spinners, the
+  picker footer and step arrows honour `--ascii`.
+- MCP: positional arguments are separated with `--`, child processes time out after 5 minutes, and
+  `ANESIS_ALLOW_RUN` is not inherited unless the call passes `allow_run: true`.
+- `ANESIS_DEBUG=0` no longer enables debug output; 4xx registry responses no longer map to the network exit code.
+- Other: stricter GitHub URL validation, complete Windows reserved names, `show_diff` reports `diff` failures,
+  `outdated` queries addons concurrently, `update --all` continues past failures, `search` treats catalog
+  failures consistently, the installer for zsh completions no longer calls `compinit` twice and bash
+  completions honour `XDG_DATA_HOME`, `upgrade` refuses package-managed installs and cleans up its temp file.
+
 ### Changed
+
+- `--json` objects built with `serde_json::json!` now keep insertion order instead of alphabetical order
+  (`serde_json` `preserve_order`). The set of keys is unchanged.
+- MSRV is now 1.89 (advisory file locking).
 
 - Template rendering now uses MiniJinja instead of Tera. The `.tera` file suffix is unchanged. Filter
   arguments follow Jinja2 syntax: `replace("a", "b")`, `default("x")`, `join(",")`, `split(" ")`

@@ -1,20 +1,21 @@
 ---
 source: tests/json_output.rs
+assertion_line: 163
 expression: "cli.json(&[\"info\", \"--json\"])"
 ---
 {
-  "account": null,
+  "version": "[version]",
   "backend": "https://api.anesis.tech",
-  "installed": {
-    "addons": 0,
-    "templates": 0
-  },
   "logged_in": false,
+  "account": null,
   "paths": {
-    "addons_cache": "[addons_cache]",
-    "auth": "[auth]",
     "home": "[home]",
-    "templates_cache": "[templates_cache]"
+    "templates_cache": "[templates_cache]",
+    "addons_cache": "[addons_cache]",
+    "auth": "[auth]"
   },
-  "version": "[version]"
+  "installed": {
+    "templates": 0,
+    "addons": 0
+  }
 }

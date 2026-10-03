@@ -32,7 +32,7 @@ pub async fn publish_stack(
   let user = get_auth_user(&ctx.paths.auth)?;
   let (method, verb) = if update {
     (
-      ctx.client.patch(format!("{}/stack/", ctx.backend_url)),
+      ctx.client.patch(format!("{}/stack", ctx.backend_url)),
       "Updating",
     )
   } else {

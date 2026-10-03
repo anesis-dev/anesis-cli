@@ -9,6 +9,7 @@ use crate::{
 use super::cache::get_cached_template;
 
 pub async fn template_info(ctx: &AppContext, template_name: &str, json: bool) -> Result<()> {
+  crate::utils::validate::validate_template_name(template_name)?;
   let cached = get_cached_template(ctx, template_name)?;
   let manifest = match cached.filter(|c| ctx.paths.templates.join(&c.path).exists()) {
     Some(cached) => read_manifest(&ctx.paths.templates.join(&cached.path))?,

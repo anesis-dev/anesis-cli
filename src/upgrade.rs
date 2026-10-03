@@ -65,23 +65,23 @@ pub async fn upgrade_cli(ctx: &AppContext) -> Result<()> {
 
   let platform = current_platform()?;
   let asset_url = release_asset_url(&releases_download_base_url(), &latest_version, platform)?;
-  let current_exe = env::current_exe().context("Failed to locate the current Anesis executable")?;
+  let current_exe = env::current_exe()
+    .context("Failed to locate the current Anesis executable")?
+    .canonicalize()
+    .context("Failed to resolve the current Anesis executable")?;
+
+  if let Some(hint) = package_manager_hint(&current_exe) {
+    return Err(anyhow!(
+      "This Anesis installation is managed by a package manager ({}); upgrading it in place \
+       would desynchronise it. {hint}",
+      current_exe.display()
+    ));
+  }
 
   let sp = spinner(format!("Downloading Anesis v{latest_version}..."));
-  let archive_bytes = ctx
-    .client
-    .get(&asset_url)
-    .header(USER_AGENT, github_user_agent())
-    .send()
+  let archive_bytes = crate::utils::archive::download_capped(&ctx.client, &asset_url, None, None)
     .await
-    .with_context(|| format!("Failed to download Anesis v{latest_version}"))
-    .inspect_err(|_| sp.finish_and_clear())?
-    .error_for_status()
-    .with_context(|| format!("GitHub release asset was not available at {asset_url}"))
-    .inspect_err(|_| sp.finish_and_clear())?
-    .bytes()
-    .await
-    .with_context(|| format!("Failed to read the downloaded Anesis v{latest_version} archive"))
+    .with_context(|| format!("Failed to download Anesis v{latest_version} from {asset_url}"))
     .inspect_err(|_| sp.finish_and_clear())?;
   sp.finish_and_clear();
 
@@ -113,14 +113,31 @@ pub async fn upgrade_cli(ctx: &AppContext) -> Result<()> {
   let binary = extract_binary_from_archive(&archive_bytes, platform)
     .context("Failed to extract binary from downloaded archive")?;
   let temp_exe = write_temp_binary(&current_exe, &binary)?;
-  mark_executable(&temp_exe)?;
-  replace_current_executable(&current_exe, &temp_exe)?;
+  if let Err(err) =
+    mark_executable(&temp_exe).and_then(|_| replace_current_executable(&current_exe, &temp_exe))
+  {
+    let _ = fs::remove_file(&temp_exe);
+    return Err(err);
+  }
 
   println!(
     "{}",
     upgrade_success_message(&latest_version, cfg!(windows))
   );
   Ok(())
+}
+
+fn package_manager_hint(exe: &Path) -> Option<&'static str> {
+  let path = exe.to_string_lossy().replace('\\', "/");
+  if path.contains("/Cellar/") || path.contains("/homebrew/") || path.contains("/linuxbrew/") {
+    Some("Run `brew upgrade anesis` instead.")
+  } else if path.contains("/node_modules/") {
+    Some("Run `npm install -g anesis@latest` (or your package manager's equivalent) instead.")
+  } else if path.contains("/.cargo/bin/") {
+    Some("Run `cargo install anesis --force` instead.")
+  } else {
+    None
+  }
 }
 
 fn upgrade_success_message(latest_version: &str, deferred_swap: bool) -> String {
@@ -147,7 +164,19 @@ pub async fn check_cli_version_cached(client: &Client, path: &Path) -> Result<Op
     return newer_version_if_available(&cache.latest_version);
   }
 
-  let latest_version = check_latest_cli_version(client).await?;
+  let latest_version = match check_latest_cli_version(client).await {
+    Ok(version) => version,
+    Err(err) => {
+      let _ = write_version_check_cache(
+        path,
+        &VersionCheckCache {
+          last_checked: Utc::now().to_rfc3339(),
+          latest_version: env!("CARGO_PKG_VERSION").to_string(),
+        },
+      );
+      return Err(err);
+    }
+  };
   write_version_check_cache(
     path,
     &VersionCheckCache {
@@ -210,7 +239,7 @@ fn write_version_check_cache(path: &Path, cache: &VersionCheckCache) -> Result<(
     fs::create_dir_all(parent).with_context(|| format!("Failed to create {}", parent.display()))?;
   }
 
-  fs::write(path, serde_json::to_string_pretty(cache)?)
+  crate::utils::atomic::write_atomic(path, serde_json::to_string_pretty(cache)?.as_bytes())
     .with_context(|| format!("Failed to write version cache to {}", path.display()))?;
   Ok(())
 }
@@ -454,8 +483,13 @@ fn write_temp_binary(current_exe: &Path, binary: &[u8]) -> Result<PathBuf> {
     .ok_or_else(|| anyhow!("Executable path is not valid UTF-8"))?;
   let temp_path = exe_dir.join(format!("{exe_name}.upgrade-{}.tmp", std::process::id()));
   fs::write(&temp_path, binary).with_context(|| {
+    let hint = if fs::metadata(exe_dir).is_ok_and(|m| m.permissions().readonly()) {
+      " (the install directory is not writable; re-run with elevated permissions)"
+    } else {
+      ""
+    };
     format!(
-      "Failed to write downloaded binary to {}",
+      "Failed to write downloaded binary to {}{hint}",
       temp_path.display()
     )
   })?;

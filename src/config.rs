@@ -33,6 +33,14 @@ pub fn init_logging(verbose: u8) {
   builder.init();
 }
 
+pub fn version_check_client() -> Client {
+  Client::builder()
+    .connect_timeout(Duration::from_secs(2))
+    .timeout(Duration::from_secs(2))
+    .build()
+    .unwrap_or_default()
+}
+
 pub fn build_app_context() -> Result<AppContext> {
   let anesis_paths = AnesisPaths::new()?;
   anesis_paths.ensure_directories()?;

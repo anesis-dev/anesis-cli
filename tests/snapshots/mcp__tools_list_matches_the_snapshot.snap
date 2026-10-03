@@ -1,230 +1,231 @@
 ---
 source: tests/mcp.rs
+assertion_line: 129
 expression: "anesis::mcp::tools_list_for_tests()"
 ---
 [
   {
+    "name": "search_registry",
     "description": "Search the Anesis registry for templates, addons and stacks. Returns matching entries as JSON.",
     "inputSchema": {
+      "type": "object",
       "properties": {
         "query": {
-          "description": "Filter text (optional; empty lists everything)",
-          "type": "string"
+          "type": "string",
+          "description": "Filter text (optional; empty lists everything)"
         }
-      },
-      "type": "object"
-    },
-    "name": "search_registry"
+      }
+    }
   },
   {
+    "name": "get_manifest",
     "description": "Show the full manifest of a template, addon or stack (description, version, variants, commands, inputs, steps).",
     "inputSchema": {
+      "type": "object",
       "properties": {
-        "id": {
-          "description": "Template name / addon id / stack id",
-          "type": "string"
-        },
         "kind": {
+          "type": "string",
           "enum": [
             "template",
             "addon",
             "stack"
-          ],
-          "type": "string"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "description": "Template name / addon id / stack id"
         }
       },
       "required": [
         "kind",
         "id"
-      ],
-      "type": "object"
-    },
-    "name": "get_manifest"
+      ]
+    }
   },
   {
+    "name": "scaffold_project",
     "description": "Create a new project from a template (or a stack). Non-interactive. Addon 'run'/'packages' steps are refused unless allow_run is true.",
     "inputSchema": {
+      "type": "object",
       "properties": {
-        "allow_run": {
-          "description": "Permit addon 'run' steps (arbitrary shell) and 'packages' steps (package installs, which run lifecycle scripts) to execute. Defaults to false; ask the user before setting it.",
-          "type": "boolean"
-        },
-        "inputs": {
-          "additionalProperties": true,
-          "description": "Template input values by name",
-          "type": "object"
-        },
         "name": {
-          "description": "Project directory to create (use '.' for the current dir)",
-          "type": "string"
-        },
-        "overwrite": {
-          "description": "Allow overwriting existing files in the destination directory. Defaults to false, which fails instead of silently clobbering files; ask the user before setting it.",
-          "type": "boolean"
-        },
-        "path": {
-          "description": "Working directory to run in (defaults to the server's cwd)",
-          "type": "string"
-        },
-        "stack": {
-          "description": "Stack id (alternative to template)",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to create (use '.' for the current dir)"
         },
         "template": {
-          "description": "Template name (omit if using a stack)",
-          "type": "string"
+          "type": "string",
+          "description": "Template name (omit if using a stack)"
+        },
+        "stack": {
+          "type": "string",
+          "description": "Stack id (alternative to template)"
+        },
+        "inputs": {
+          "type": "object",
+          "description": "Template input values by name",
+          "additionalProperties": true
+        },
+        "allow_run": {
+          "type": "boolean",
+          "description": "Permit addon 'run' steps (arbitrary shell) and 'packages' steps (package installs, which run lifecycle scripts) to execute. Defaults to false; ask the user before setting it."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow overwriting existing files in the destination directory. Defaults to false, which fails instead of silently clobbering files; ask the user before setting it."
+        },
+        "path": {
+          "type": "string",
+          "description": "Working directory to run in (defaults to the server's cwd)"
         }
       },
       "required": [
         "name"
-      ],
-      "type": "object"
-    },
-    "name": "scaffold_project"
+      ]
+    }
   },
   {
+    "name": "apply_addon",
     "description": "Run an addon command in an existing project. Non-interactive. If the command has a 'run' or 'packages' step it will fail unless allow_run is true.",
     "inputSchema": {
+      "type": "object",
       "properties": {
         "addon_id": {
           "type": "string"
         },
-        "allow_run": {
-          "description": "Permit addon 'run' steps (arbitrary shell) and 'packages' steps (package installs, which run lifecycle scripts) to execute. Defaults to false; ask the user before setting it.",
-          "type": "boolean"
-        },
         "command": {
-          "description": "Addon command to run",
-          "type": "string"
+          "type": "string",
+          "description": "Addon command to run"
         },
         "inputs": {
-          "additionalProperties": true,
+          "type": "object",
           "description": "Addon input values by name",
-          "type": "object"
+          "additionalProperties": true
+        },
+        "allow_run": {
+          "type": "boolean",
+          "description": "Permit addon 'run' steps (arbitrary shell) and 'packages' steps (package installs, which run lifecycle scripts) to execute. Defaults to false; ask the user before setting it."
         },
         "path": {
-          "description": "Project directory to run in",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to run in"
         }
       },
       "required": [
         "addon_id",
         "command"
-      ],
-      "type": "object"
-    },
-    "name": "apply_addon"
+      ]
+    }
   },
   {
+    "name": "apply_stack",
     "description": "Scaffold a new project from a stack (template + ordered addons). Non-interactive. Addon 'run'/'packages' steps are refused unless allow_run is true.",
     "inputSchema": {
+      "type": "object",
       "properties": {
-        "allow_run": {
-          "description": "Permit addon 'run' steps (arbitrary shell) and 'packages' steps (package installs, which run lifecycle scripts) to execute. Defaults to false; ask the user before setting it.",
-          "type": "boolean"
-        },
-        "inputs": {
-          "additionalProperties": true,
-          "type": "object"
-        },
         "name": {
-          "description": "Project directory to create",
-          "type": "string"
-        },
-        "overwrite": {
-          "description": "Allow overwriting existing files in the destination directory. Defaults to false, which fails instead of silently clobbering files; ask the user before setting it.",
-          "type": "boolean"
-        },
-        "path": {
-          "description": "Working directory to run in",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to create"
         },
         "stack": {
-          "description": "Stack id",
-          "type": "string"
+          "type": "string",
+          "description": "Stack id"
+        },
+        "inputs": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "allow_run": {
+          "type": "boolean",
+          "description": "Permit addon 'run' steps (arbitrary shell) and 'packages' steps (package installs, which run lifecycle scripts) to execute. Defaults to false; ask the user before setting it."
+        },
+        "overwrite": {
+          "type": "boolean",
+          "description": "Allow overwriting existing files in the destination directory. Defaults to false, which fails instead of silently clobbering files; ask the user before setting it."
+        },
+        "path": {
+          "type": "string",
+          "description": "Working directory to run in"
         }
       },
       "required": [
         "name",
         "stack"
-      ],
-      "type": "object"
-    },
-    "name": "apply_stack"
+      ]
+    }
   },
   {
+    "name": "project_status",
     "description": "Report the current project's template and applied addons as JSON.",
     "inputSchema": {
+      "type": "object",
       "properties": {
         "path": {
-          "description": "Project directory to inspect",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to inspect"
         }
-      },
-      "type": "object"
-    },
-    "name": "project_status"
+      }
+    }
   },
   {
+    "name": "dry_run",
     "description": "Preview an addon command's plan (variant, inputs, steps) without changing any files. Use this before apply_addon to see what would happen.",
     "inputSchema": {
+      "type": "object",
       "properties": {
         "addon_id": {
           "type": "string"
         },
         "command": {
-          "description": "Addon command to preview",
-          "type": "string"
+          "type": "string",
+          "description": "Addon command to preview"
         },
         "inputs": {
-          "additionalProperties": true,
+          "type": "object",
           "description": "Addon input values by name",
-          "type": "object"
+          "additionalProperties": true
         },
         "path": {
-          "description": "Project directory to run in",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to run in"
         }
       },
       "required": [
         "addon_id",
         "command"
-      ],
-      "type": "object"
-    },
-    "name": "dry_run"
+      ]
+    }
   },
   {
+    "name": "undo_addon",
     "description": "Revert an applied addon's changes in the current project, using the recorded rollback journal.",
     "inputSchema": {
+      "type": "object",
       "properties": {
         "addon_id": {
-          "description": "Addon id to revert",
-          "type": "string"
+          "type": "string",
+          "description": "Addon id to revert"
         },
         "path": {
-          "description": "Project directory to run in",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to run in"
         }
       },
       "required": [
         "addon_id"
-      ],
-      "type": "object"
-    },
-    "name": "undo_addon"
+      ]
+    }
   },
   {
+    "name": "list_outdated",
     "description": "List applied addons that have a newer version in the registry, as JSON.",
     "inputSchema": {
+      "type": "object",
       "properties": {
         "path": {
-          "description": "Project directory to inspect",
-          "type": "string"
+          "type": "string",
+          "description": "Project directory to inspect"
         }
-      },
-      "type": "object"
-    },
-    "name": "list_outdated"
+      }
+    }
   }
 ]

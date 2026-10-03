@@ -1,6 +1,6 @@
 [package]
 name = "anesis"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 authors = ["Maksym <maksymzhuk759@gmail.com>"]
 description = "CLI for scaffolding projects from remote templates and extending them with project addons"
@@ -12,7 +12,7 @@ readme = "README.md"
 keywords = ["cli", "scaffold", "template", "addon"]
 categories = ["command-line-utilities", "development-tools"]
 # edition 2024 + let-chains (main.rs, upgrade.rs)
-rust-version = "1.88"
+rust-version = "1.89"
 
 include = [
   "src/**/*",
@@ -37,7 +37,7 @@ tokio = { version = "1.36", features = ["rt", "macros", "net", "time"] }
 ignore = "0.4"
 tempfile = "3.10"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_yaml = { package = "serde_yaml_ng", version = "0.10" }
 toml = "1.0.1"
 reqwest = { version = "0.12", default-features = false, features = [
@@ -56,7 +56,7 @@ regex = "1.10"
 semver = "1.0"
 dirs = "6.0"
 which = "7"
-ctrlc = "3.5.2"
+ctrlc = { version = "3.5.2", features = ["termination"] }
 chrono = "0.4.43"
 comfy-table = "7"
 crossterm = "0.29"
