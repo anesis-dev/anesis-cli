@@ -10,6 +10,8 @@ Versions prior to 1.0.0 were not tracked in this file; see the
 
 ## [Unreleased]
 
+## [1.0.1]
+
 ### Fixed
 
 - `anesis use --diff` no longer prints gitignored files (such as `.env`) or `node_modules`; both sides of the
