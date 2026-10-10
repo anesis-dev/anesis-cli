@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 serde_json = "1.0"
-jsonschema = "0.28"
+jsonschema = "0.58"
 walkdir = "2.4"
 anyhow = "1.0"
 # Same version the CLI resolves `glob` targets with, so a pattern that lints
