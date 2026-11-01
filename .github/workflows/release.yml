@@ -102,7 +102,7 @@ jobs:
                   key: ${{ matrix.target }}
 
             - name: Install cargo-nextest
-              uses: taiki-e/install-action@154e354fb1a868a1e88d0f08c1e5e9118f8f049d # nextest
+              uses: taiki-e/install-action@1beb33eee6d086258184383af9a538940be190ed # nextest
 
             - name: Run tests
               run: cargo nextest run --all-features --locked --target ${{ matrix.target }}
